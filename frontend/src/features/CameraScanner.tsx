@@ -1,16 +1,28 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, History, LogOut, ScanFace, ShieldAlert, ShieldCheck, Upload } from "lucide-react";
-import { api, MarcajeRecord, User } from "../lib/api";
+import {
+  Camera,
+  History,
+  LayoutDashboard,
+  LogOut,
+  MapPin,
+  ScanFace,
+  ShieldAlert,
+  ShieldCheck,
+  Upload,
+} from "lucide-react";
+import { api, MarcajeRecord, MarcajeSettings, User } from "../lib/api";
 import { StatusBadge } from "../components/ui/StatusBadge";
+import { Toast, ToastData } from "../components/ui/Toast";
 
 interface Props {
   user: User;
   onLogout: () => void;
+  onSwitchToAdmin?: () => void;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export function CameraScanner({ user, onLogout }: Props) {
+export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -22,18 +34,21 @@ export function CameraScanner({ user, onLogout }: Props) {
   const [scanError, setScanError] = useState("");
   const [lastResult, setLastResult] = useState<MarcajeRecord | null>(null);
   const [history, setHistory] = useState<MarcajeRecord[]>([]);
+  const [settings, setSettings] = useState<MarcajeSettings | null>(null);
+  const [toast, setToast] = useState<ToastData | null>(null);
 
-  const loadHistory = async () => {
+  const loadData = async () => {
     try {
-      const records = await api.getHistory();
+      const [records, cfg] = await Promise.all([api.getHistory(), api.getSettings()]);
       setHistory(records);
+      setSettings(cfg);
     } catch {
       // Silencioso en carga inicial
     }
   };
 
   useEffect(() => {
-    loadHistory();
+    loadData();
     let stream: MediaStream | null = null;
 
     navigator.mediaDevices
@@ -70,6 +85,23 @@ export function CameraScanner({ user, onLogout }: Props) {
     );
   };
 
+  const notifyResult = (result: MarcajeRecord) => {
+    if (result.is_compliant) {
+      setToast({
+        type: "success",
+        title: "Marcaje Aprobado",
+        message: "Cumples con todo el equipo de protección requerido.",
+      });
+    } else {
+      const faltantes = result.missing_items?.join(", ") || "Equipo requerido";
+      setToast({
+        type: "error",
+        title: "Marcaje Rechazado",
+        message: `Falta: ${faltantes}.`,
+      });
+    }
+  };
+
   const captureLiveSequence = async () => {
     setScanning(true);
     setScanError("");
@@ -86,9 +118,12 @@ export function CameraScanner({ user, onLogout }: Props) {
       setLivenessPrompt("Analizando autenticidad y equipo de protección...");
       const result = await api.scanFrames(blobs, "live");
       setLastResult(result);
-      await loadHistory();
+      notifyResult(result);
+      await loadData();
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : "Error al analizar la captura en vivo");
+      const msg = err instanceof Error ? err.message : "Error al analizar la captura en vivo";
+      setScanError(msg);
+      setToast({ type: "error", title: "Escaneo no completado", message: msg });
     } finally {
       setScanning(false);
       setLivenessPrompt("");
@@ -103,14 +138,25 @@ export function CameraScanner({ user, onLogout }: Props) {
     try {
       const result = await api.scanFrames([file], "upload");
       setLastResult(result);
-      await loadHistory();
+      notifyResult(result);
+      await loadData();
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : "Error al analizar la imagen");
+      const msg = err instanceof Error ? err.message : "Error al analizar la imagen";
+      setScanError(msg);
+      setToast({ type: "error", title: "Error en análisis", message: msg });
     } finally {
       setScanning(false);
       e.target.value = "";
     }
   };
+
+  const requiredList = settings
+    ? [
+        settings.require_helmet ? "Casco" : null,
+        settings.require_glasses ? "Lentes" : null,
+        settings.require_mask ? "Mascarilla" : null,
+      ].filter(Boolean)
+    : [];
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -120,21 +166,66 @@ export function CameraScanner({ user, onLogout }: Props) {
             <ScanFace className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white">Terminal de Marcaje EPP</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-bold text-white">Terminal de Marcaje EPP</h1>
+              <span className="rounded-md bg-slate-800 px-2.5 py-0.5 text-[11px] font-medium text-indigo-300">
+                {user.job_title || (user.role === "admin" ? "Administrador" : "Operador")}
+              </span>
+            </div>
             <p className="text-xs text-slate-400">
-              Operador: <span className="font-medium text-slate-200">{user.full_name}</span> ({user.email})
+              {user.full_name} ({user.email})
             </p>
           </div>
         </div>
 
-        <button
-          onClick={onLogout}
-          className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-medium text-slate-300 transition hover:border-rose-500/50 hover:text-rose-300"
-        >
-          <LogOut className="h-4 w-4" />
-          Cerrar sesión
-        </button>
+        <div className="flex items-center gap-2.5">
+          {user.role === "admin" && onSwitchToAdmin && (
+            <button
+              onClick={onSwitchToAdmin}
+              className="flex items-center gap-2 rounded-xl border border-indigo-500/40 bg-indigo-600/15 px-4 py-2 text-xs font-semibold text-indigo-300 transition hover:bg-indigo-600/25"
+            >
+              <LayoutDashboard className="h-4 w-4" />
+              Panel Administrador
+            </button>
+          )}
+
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-medium text-slate-300 transition hover:border-rose-500/50 hover:text-rose-300"
+          >
+            <LogOut className="h-4 w-4" />
+            Cerrar sesión
+          </button>
+        </div>
       </header>
+
+      {settings && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-5 py-3 text-xs">
+          <div className="flex items-center gap-2 text-slate-300">
+            <MapPin className="h-4 w-4 text-indigo-400" />
+            <span>
+              Zona activa: <strong className="text-white">{settings.zone_name}</strong>
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-400">EPP obligatorio:</span>
+            {requiredList.length > 0 ? (
+              requiredList.map((item) => (
+                <span
+                  key={item}
+                  className="rounded-md bg-indigo-500/15 px-2.5 py-0.5 font-medium text-indigo-300"
+                >
+                  {item}
+                </span>
+              ))
+            ) : (
+              <span className="rounded-md bg-emerald-500/15 px-2.5 py-0.5 font-medium text-emerald-300">
+                Solo presencia (sin EPP obligatorio)
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
@@ -217,33 +308,49 @@ export function CameraScanner({ user, onLogout }: Props) {
             ) : (
               <div className="space-y-3">
                 <div
-                  className={`flex items-center gap-3 rounded-xl p-3.5 ${
+                  className={`flex items-start gap-3 rounded-xl p-3.5 ${
                     lastResult.is_compliant
                       ? "bg-emerald-500/15 text-emerald-300"
-                      : "bg-amber-500/15 text-amber-300"
+                      : "bg-rose-500/15 text-rose-300"
                   }`}
                 >
                   {lastResult.is_compliant ? (
-                    <ShieldCheck className="h-6 w-6 shrink-0 text-emerald-400" />
+                    <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-emerald-400" />
                   ) : (
-                    <ShieldAlert className="h-6 w-6 shrink-0 text-amber-400" />
+                    <ShieldAlert className="mt-0.5 h-6 w-6 shrink-0 text-rose-400" />
                   )}
                   <div>
                     <p className="text-sm font-bold">
-                      {lastResult.is_compliant ? "Marcaje Aprobado (EPP OK)" : "Persona Detectada sin EPP"}
+                      {lastResult.is_compliant ? "Marcaje Aprobado" : "Marcaje Rechazado"}
                     </p>
-                    <p className="text-xs opacity-80">
+                    {!lastResult.is_compliant &&
+                      lastResult.missing_items &&
+                      lastResult.missing_items.length > 0 && (
+                        <p className="mt-0.5 text-xs font-medium text-rose-200">
+                          Falta: {lastResult.missing_items.join(", ")}
+                        </p>
+                      )}
+                    <p className="mt-0.5 text-xs opacity-80">
                       Confianza: {(lastResult.confidence * 100).toFixed(1)}% ·{" "}
-                      {lastResult.is_live_person ? "Persona real (En vivo)" : "Modo archivo de prueba"}
+                      {lastResult.is_live_person ? "En vivo" : "Prueba"}
                     </p>
                   </div>
                 </div>
 
                 <StatusBadge label="Persona en cuadro" active={lastResult.person_detected} />
                 <StatusBadge label="Prueba de vida (Real)" active={lastResult.is_live_person} />
-                <StatusBadge label="Casco de seguridad" active={lastResult.has_helmet} />
-                <StatusBadge label="Lentes de protección" active={lastResult.has_glasses} />
-                <StatusBadge label="Mascarilla" active={lastResult.has_mask} />
+                <StatusBadge
+                  label={`Casco ${settings && !settings.require_helmet ? "(Opcional)" : ""}`}
+                  active={lastResult.has_helmet}
+                />
+                <StatusBadge
+                  label={`Lentes ${settings && !settings.require_glasses ? "(Opcional)" : ""}`}
+                  active={lastResult.has_glasses}
+                />
+                <StatusBadge
+                  label={`Mascarilla ${settings && !settings.require_mask ? "(Opcional)" : ""}`}
+                  active={lastResult.has_mask}
+                />
               </div>
             )}
           </div>
@@ -253,7 +360,7 @@ export function CameraScanner({ user, onLogout }: Props) {
       <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-900 p-6">
         <div className="mb-4 flex items-center gap-2">
           <History className="h-5 w-5 text-indigo-400" />
-          <h2 className="text-base font-semibold text-white">Historial Reciente de Marcajes</h2>
+          <h2 className="text-base font-semibold text-white">Mi Historial de Marcajes</h2>
         </div>
 
         <div className="overflow-x-auto">
@@ -287,10 +394,10 @@ export function CameraScanner({ user, onLogout }: Props) {
                         className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
                           item.is_compliant
                             ? "bg-emerald-500/15 text-emerald-300"
-                            : "bg-amber-500/15 text-amber-300"
+                            : "bg-rose-500/15 text-rose-300"
                         }`}
                       >
-                        {item.is_compliant ? "Aprobado" : "Sin EPP"}
+                        {item.is_compliant ? "Aprobado" : "Rechazado"}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-xs text-slate-400">
@@ -307,6 +414,8 @@ export function CameraScanner({ user, onLogout }: Props) {
           </table>
         </div>
       </div>
+
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }

@@ -2,21 +2,36 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.api.v1 import auth, marcaje
+from sqlalchemy import text
+from app.api.v1 import admin, auth, marcaje
 from app.core.config import settings
 from app.db.models import Base
-from app.db.session import engine
+from app.db.session import SessionLocal, engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    # Migración segura de columna job_title sin perder datos existentes
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(100) NOT NULL DEFAULT 'Operador General'"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE users SET job_title = 'Administrador' WHERE role = 'admin' AND job_title = 'Operador General'"
+            )
+        )
+    with SessionLocal() as db:
+        admin.ensure_default_roles(db)
     yield
 
 
 app = FastAPI(
     title="API Marcaje EPP",
-    version="0.3.1",
+    version="0.5.0",
     lifespan=lifespan,
 )
 
@@ -46,12 +61,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.FRONTEND_URL],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(marcaje.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health", tags=["Sistema"])

@@ -1,40 +1,44 @@
+import gc
 import io
 from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
+import torch
 from ultralytics import YOLO, YOLOWorld
 
+torch.set_num_threads(1)
+
 CUSTOM_WEIGHTS = Path("/app/models/epp.pt")
-WORLD_WEIGHTS = "/opt/ml_cache/yolov8s-worldv2.pt"
+WORLD_WEIGHTS = "/opt/ml_cache/yolov8n-worldv2.pt"
 
 TARGET_CLASSES = [
     "person",
     "hard hat",
     "safety helmet",
     "safety glasses",
-    "protective goggles",
+    "glasses",
     "face mask",
     "surgical mask",
     "cell phone",
-    "smartphone",
-    "tablet",
     "laptop",
-    "tv",
     "monitor",
 ]
 
-SPOOF_LABELS = {"cell phone", "smartphone", "tablet", "laptop", "tv", "monitor"}
+SPOOF_LABELS = {"cell phone", "laptop", "monitor"}
+HELMET_LABELS = {"helmet", "hardhat", "hard hat", "safety helmet", "casco"}
+GLASSES_LABELS = {"glasses", "safety glasses", "goggles", "lentes", "gafas"}
+MASK_LABELS = {"mask", "face mask", "surgical mask", "mascarilla", "cubrebocas"}
 
 
-def enhance_low_light(pil_image: Image.Image, brightness_threshold: float = 85.0) -> Image.Image:
-    """Mejora el contraste local (CLAHE) si la imagen está oscura."""
+def enhance_contrast(pil_image: Image.Image, force: bool = False, brightness_threshold: float = 85.0) -> Image.Image:
+    """Mejora el contraste local (CLAHE) en baja luz o para resaltar bordes de lentes claros."""
     rgb = np.array(pil_image)
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
     l_channel, a_channel, b_channel = cv2.split(lab)
 
-    if float(np.mean(l_channel)) < brightness_threshold:
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    if force or float(np.mean(l_channel)) < brightness_threshold:
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
         l_channel = clahe.apply(l_channel)
         merged = cv2.merge((l_channel, a_channel, b_channel))
         enhanced_rgb = cv2.cvtColor(merged, cv2.COLOR_LAB2RGB)
@@ -44,25 +48,30 @@ def enhance_low_light(pil_image: Image.Image, brightness_threshold: float = 85.0
 
 
 class PPEDetectorService:
-    """Servicio desacoplado de detección de persona, EPP y objetos de fraude."""
+    """Servicio de detección en 2 etapas optimizado para baja memoria RAM."""
 
     def __init__(self) -> None:
         if CUSTOM_WEIGHTS.exists():
             self.model = YOLO(str(CUSTOM_WEIGHTS))
             self.using_custom_ppe = True
         else:
-            weights_path = WORLD_WEIGHTS if Path(WORLD_WEIGHTS).exists() else "yolov8s-worldv2.pt"
+            weights_path = WORLD_WEIGHTS if Path(WORLD_WEIGHTS).exists() else "yolov8n-worldv2.pt"
             self.model = YOLOWorld(weights_path)
             self.model.set_classes(TARGET_CLASSES)
             self.using_custom_ppe = False
 
-    def analyze_image(self, image_bytes: bytes, conf_threshold: float = 0.22) -> dict:
+    def analyze_image(self, image_bytes: bytes, conf_threshold: float = 0.20) -> dict:
         image = Image.open(io.BytesIO(image_bytes))
         image = ImageOps.exif_transpose(image).convert("RGB")
-        image = enhance_low_light(image)
+        image.thumbnail((960, 960))
+        image = enhance_contrast(image, force=False)
+        img_w, img_h = image.size
 
-        results = self.model.predict(source=image, conf=conf_threshold, verbose=False)
+        with torch.no_grad():
+            results = self.model.predict(source=image, conf=conf_threshold, imgsz=512, verbose=False)
+
         detections = []
+        person_boxes: list[list[float]] = []
 
         person_detected = False
         spoof_device_detected = False
@@ -82,17 +91,54 @@ class PPEDetectorService:
                 detections.append({"label": label, "confidence": conf, "bbox": bbox})
                 max_conf = max(max_conf, conf)
 
-                if label in SPOOF_LABELS and conf >= 0.42:
+                if label in SPOOF_LABELS and conf >= 0.45:
                     spoof_device_detected = True
                 elif label in {"person", "persona"}:
                     person_detected = True
-                elif label in {"helmet", "hardhat", "hard hat", "safety helmet", "casco"}:
+                    person_boxes.append(bbox)
+                elif label in HELMET_LABELS:
                     has_helmet = True
-                elif label in {"glasses", "goggles", "protective goggles", "safety-glasses", "safety glasses", "eyeglasses", "lentes", "gafas"}:
+                elif label in GLASSES_LABELS:
                     has_glasses = True
-                elif label in {"mask", "face-mask", "face mask", "surgical mask", "mascarilla", "cubrebocas"}:
+                elif label in MASK_LABELS:
                     has_mask = True
 
+        for px1, py1, px2, py2 in person_boxes:
+            box_h = py2 - py1
+            crop_x1 = max(0, int(px1))
+            crop_y1 = max(0, int(py1))
+            crop_x2 = min(img_w, int(px2))
+            crop_y2 = min(img_h, int(py1 + box_h * 0.72))
+
+            if crop_x2 - crop_x1 > 40 and crop_y2 - crop_y1 > 40:
+                head_crop = enhance_contrast(image.crop((crop_x1, crop_y1, crop_x2, crop_y2)), force=True)
+                with torch.no_grad():
+                    head_results = self.model.predict(source=head_crop, conf=0.10, imgsz=384, verbose=False)
+
+                for h_res in head_results:
+                    h_names = h_res.names
+                    for h_box in h_res.boxes:
+                        h_label = str(h_names[int(h_box.cls[0])]).lower().strip()
+                        h_conf = round(float(h_box.conf[0]), 4)
+                        hx1, hy1, hx2, hy2 = h_box.xyxy[0].tolist()
+                        full_bbox = [
+                            round(hx1 + crop_x1, 2),
+                            round(hy1 + crop_y1, 2),
+                            round(hx2 + crop_x1, 2),
+                            round(hy2 + crop_y1, 2),
+                        ]
+
+                        if h_label in HELMET_LABELS and h_conf >= 0.16:
+                            has_helmet = True
+                            detections.append({"label": h_label, "confidence": h_conf, "bbox": full_bbox})
+                        elif h_label in GLASSES_LABELS and h_conf >= 0.10:
+                            has_glasses = True
+                            detections.append({"label": h_label, "confidence": h_conf, "bbox": full_bbox})
+                        elif h_label in MASK_LABELS and h_conf >= 0.16:
+                            has_mask = True
+                            detections.append({"label": h_label, "confidence": h_conf, "bbox": full_bbox})
+
+        gc.collect()
         is_compliant = person_detected and not spoof_device_detected and (has_helmet or has_glasses or has_mask)
 
         return {

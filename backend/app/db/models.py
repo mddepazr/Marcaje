@@ -12,12 +12,24 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(150), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(30), default="employee", nullable=False)
+    job_title: Mapped[str] = mapped_column(String(100), default="Operador General", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
     records: Mapped[list["AttendanceRecord"]] = relationship(back_populates="user")
+
+
+class JobRole(Base):
+    __tablename__ = "job_roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class AttendanceRecord(Base):
@@ -39,3 +51,19 @@ class AttendanceRecord(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="records")
+
+
+class MarcajeSettings(Base):
+    __tablename__ = "marcaje_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    zone_name: Mapped[str] = mapped_column(String(100), default="Área Operativa General", nullable=False)
+    require_helmet: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    require_glasses: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    require_mask: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    min_confidence: Mapped[float] = mapped_column(Float, default=0.20, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
