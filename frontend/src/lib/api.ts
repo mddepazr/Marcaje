@@ -72,7 +72,7 @@ export interface AdminUserItem {
   created_at: string;
 }
 
-async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 8000): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 665000): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -115,7 +115,7 @@ export const api = {
 
   logout: () => request<{ message: string }>("/auth/logout", { method: "POST" }),
 
-  me: () => request<User>("/auth/me", {}, 5000),
+  me: () => request<User>("/auth/me", {}, 65000),
 
   getSettings: () => request<MarcajeSettings>("/admin/settings"),
 
