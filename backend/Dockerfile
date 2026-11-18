@@ -19,7 +19,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
-RUN python -c "from ultralytics import YOLOWorld; m = YOLOWorld('yolov8n-worldv2.pt'); m.set_classes(['person', 'hard hat', 'safety helmet', 'safety glasses', 'glasses', 'face mask', 'surgical mask', 'cell phone', 'laptop', 'monitor'])"
+RUN cd /opt/ml_cache && python -c "from ultralytics import YOLOWorld; m = YOLOWorld('yolov8s-worldv2.pt'); m.set_classes(['person', 'hard hat', 'safety helmet', 'safety glasses', 'glasses', 'face mask', 'surgical mask', 'cell phone', 'laptop', 'monitor'])"
 
 COPY . .
 

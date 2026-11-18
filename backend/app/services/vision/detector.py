@@ -10,7 +10,7 @@ from ultralytics import YOLO, YOLOWorld
 torch.set_num_threads(1)
 
 CUSTOM_WEIGHTS = Path("/app/models/epp.pt")
-WORLD_WEIGHTS = "/opt/ml_cache/yolov8n-worldv2.pt"
+WORLD_WEIGHTS = "/opt/ml_cache/yolov8s-worldv2.pt"
 
 TARGET_CLASSES = [
     "person",
@@ -55,7 +55,7 @@ class PPEDetectorService:
             self.model = YOLO(str(CUSTOM_WEIGHTS))
             self.using_custom_ppe = True
         else:
-            weights_path = WORLD_WEIGHTS if Path(WORLD_WEIGHTS).exists() else "yolov8n-worldv2.pt"
+            weights_path = WORLD_WEIGHTS if Path(WORLD_WEIGHTS).exists() else "yolov8s-worldv2.pt"
             self.model = YOLOWorld(weights_path)
             self.model.set_classes(TARGET_CLASSES)
             self.using_custom_ppe = False
