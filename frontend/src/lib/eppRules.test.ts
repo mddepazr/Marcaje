@@ -30,7 +30,7 @@ describe("Reglas de cumplimiento EPP y permisos - Marcaje", () => {
       has_mask: false,
     };
 
-    expect(getMissingPPE(scan, fullZoneRules)).toEqual(["Casco"]);
+    expect(getMissingPPE(scan, fullZoneRules)).toEqual(["Mascarilla"]);
     expect(evaluateCompliance(scan, fullZoneRules)).toBe(false);
   });
 
