@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle,
   Camera,
   CheckCircle2,
   Clock,
@@ -21,9 +20,22 @@ import {
   Upload,
   UserCheck,
   UserPlus,
-  X,
   XCircle,
 } from "lucide-react";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Divider } from "@astryxdesign/core/Divider";
+import { Heading } from "@astryxdesign/core/Heading";
+import { HStack } from "@astryxdesign/core/HStack";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { TopNav, TopNavHeading } from "@astryxdesign/core/TopNav";
+import { VStack } from "@astryxdesign/core/VStack";
 import {
   AdminUserItem,
   api,
@@ -205,7 +217,6 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
     };
   }, []);
 
-  // Conectar stream de cámara al visor dentro del modal cuando esté abierto
   useEffect(() => {
     if (enrollOpen && enrollMode === "camera" && enrollVideoRef.current && mediaStreamRef.current) {
       enrollVideoRef.current.srcObject = mediaStreamRef.current;
@@ -497,7 +508,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
       } else {
         const sourceVideo = enrollVideoRef.current || videoRef.current;
         if (!sourceVideo || !cameraReady) {
-          throw new Error("La cámara no está disponible. Usa la pestaña 'Desde Fotografía'.");
+          throw new Error("La cámara no está disponible. Usa la pestaña 'Desde fotografía'.");
         }
         const collected: number[][] = [];
         for (let i = 0; i < 6; i++) {
@@ -511,7 +522,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
         if (collected.length < 2) {
           throw new Error(
-            "Poca iluminación o rostro fuera de foco. Enciende una luz o usa la pestaña 'Desde Fotografía'."
+            "Poca iluminación o rostro fuera de foco. Enciende una luz o usa la pestaña 'Desde fotografía'."
           );
         }
         descriptorToSave = averageDescriptors(collected);
@@ -587,148 +598,150 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
       ].filter((x) => x.req)
     : [];
 
-  const pillStyles = {
-    neutral: "border-white/15 bg-slate-950/80 text-slate-200",
-    amber: "border-amber-400/50 bg-amber-950/90 text-amber-200",
-    green: "border-emerald-400/50 bg-emerald-950/90 text-emerald-200",
-    red: "border-rose-500/60 bg-rose-950/90 text-rose-200",
-  }[pillTone];
-
   const frameBorderStyles =
     stage === "PHASE2_EQUIPPING"
-      ? "border-2 border-dashed border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.25)]"
+      ? "border-2 border-dashed border-amber-400"
       : identifiedProfile
-      ? "border-2 border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.28)]"
+      ? "border-2 border-emerald-400"
       : pillTone === "red"
-      ? "border-2 border-rose-500/80 shadow-[0_0_25px_rgba(244,63,94,0.25)]"
-      : "border border-white/25";
+      ? "border-2 border-rose-500"
+      : "border border-white/30";
+
+  const zoneOptions = zones.map((z) => ({
+    value: String(z.id),
+    label: z.name,
+    description: z.description || undefined,
+  }));
+
+  const userOptions = allUsers.map((u) => ({
+    value: String(u.id),
+    label: u.full_name,
+    description: u.email,
+  }));
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-slate-100">
-      <div className="mx-auto max-w-6xl px-4 py-4 sm:py-6">
-        {/* Top Bar Compacta y Limpia */}
-        <header className="mb-5 flex items-center justify-between gap-3 rounded-2xl border border-slate-800/90 bg-slate-900/75 px-4 py-3 backdrop-blur">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-md shadow-indigo-500/20">
-              <ScanFace className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="truncate text-sm font-bold tracking-tight text-white sm:text-base">
-                  Terminal Biométrica EPP
-                </h1>
-                <span className="hidden items-center gap-1 rounded-full bg-slate-800 px-2.5 py-0.5 font-mono text-[11px] font-medium text-indigo-300 sm:inline-flex">
-                  <Clock className="h-3 w-3" />
-                  {clockText}
-                </span>
-              </div>
-              <p className="truncate text-[11px] text-slate-400">
-                {user.full_name} ·{" "}
-                <span className="text-emerald-400">
-                  {biometricDir.length} {biometricDir.length === 1 ? "rostro activo" : "rostros activos"}
-                </span>
-              </p>
-            </div>
-          </div>
+    <div style={{ backgroundColor: "var(--color-background-body)" }} className="min-h-screen">
+      <div
+        style={{
+          backgroundColor: "var(--color-background-surface)",
+          borderColor: "var(--color-border-subtle)",
+        }}
+        className="border-b"
+      >
+        <div className="mx-auto max-w-6xl px-4">
+          <TopNav
+            label="Navegación de Terminal Biométrica"
+            heading={
+              <HStack gap={2} vAlign="center">
+                <ScanFace className="h-5 w-5" />
+                <TopNavHeading>Terminal Biométrica EPP</TopNavHeading>
+              </HStack>
+            }
+            startContent={
+              <HStack gap={2} vAlign="center">
+                <Badge
+                  variant="neutral"
+                  icon={<Clock className="h-3 w-3" />}
+                  label={
+                    <Text type="code" hasTabularNumbers>
+                      {clockText}
+                    </Text>
+                  }
+                />
+                <Text type="supporting">
+                  {user.full_name} · {biometricDir.length}{" "}
+                  {biometricDir.length === 1 ? "rostro" : "rostros"}
+                </Text>
+              </HStack>
+            }
+            endContent={
+              <HStack gap={2} vAlign="center">
+                <Button
+                  label="Enrolar Rostro"
+                  variant="secondary"
+                  size="sm"
+                  icon={<UserPlus className="h-3.5 w-3.5" />}
+                  onClick={() => {
+                    setEnrollMode("camera");
+                    setEnrollOpen(true);
+                  }}
+                />
+                {user.role === "admin" && onSwitchToAdmin && (
+                  <Button
+                    label="Panel Admin"
+                    variant="secondary"
+                    size="sm"
+                    icon={<LayoutDashboard className="h-3.5 w-3.5" />}
+                    onClick={onSwitchToAdmin}
+                  />
+                )}
+                <Button
+                  label="Salir"
+                  variant="ghost"
+                  size="sm"
+                  icon={<LogOut className="h-3.5 w-3.5" />}
+                  onClick={onLogout}
+                />
+              </HStack>
+            }
+          />
+        </div>
+      </div>
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setEnrollMode("camera");
-                setEnrollOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-500/30 transition hover:bg-emerald-500/25"
-            >
-              <UserPlus className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Enrolar Rostro</span>
-              <span className="sm:hidden">Rostro</span>
-            </button>
-
-            {user.role === "admin" && onSwitchToAdmin && (
-              <button
-                onClick={onSwitchToAdmin}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-500/15 px-3 py-2 text-xs font-semibold text-indigo-300 ring-1 ring-inset ring-indigo-500/30 transition hover:bg-indigo-500/25"
-              >
-                <LayoutDashboard className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Panel Admin</span>
-                <span className="sm:hidden">Admin</span>
-              </button>
-            )}
-
-            <button
-              onClick={onLogout}
-              title="Cerrar sesión"
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-800/80 px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:border-rose-500/40 hover:text-rose-300"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </header>
-
-        {/* Grid Principal */}
+      <div className="mx-auto max-w-6xl px-4 py-6">
         <div className="grid gap-6 lg:grid-cols-12">
           {/* Columna Izquierda: Quiosco Interactivo */}
           <div className="lg:col-span-7">
-            <div className="overflow-hidden rounded-3xl border border-slate-800/90 bg-slate-900/90 shadow-2xl">
-              {/* Cabecera del Quiosco: Selector de Área + EPP Exigido */}
-              <div className="border-b border-slate-800/80 bg-slate-900 px-4 py-3.5 sm:px-5">
-                <div className="flex flex-wrap items-center justify-between gap-2.5">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-indigo-400" />
-                    <select
-                      value={selectedZoneId ?? ""}
-                      onChange={(e) => {
-                        setSelectedZoneId(Number(e.target.value));
+            <Card padding={5}>
+              <VStack gap={4}>
+                {/* Selector de Área + Flujo */}
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div className="min-w-[220px] flex-1">
+                    <Selector
+                      label="Área operativa"
+                      size="sm"
+                      width="100%"
+                      startIcon={<MapPin className="h-3.5 w-3.5" />}
+                      options={zoneOptions}
+                      value={selectedZoneId !== null ? String(selectedZoneId) : undefined}
+                      onChange={(val) => {
+                        setSelectedZoneId(Number(val));
                         resetBiometricCycle();
                       }}
-                      className="rounded-xl border border-slate-700/80 bg-slate-950 px-3 py-1.5 text-xs font-bold text-white focus:border-indigo-500 focus:outline-none"
-                    >
-                      {zones.map((z) => (
-                        <option key={z.id} value={z.id}>
-                          {z.name}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </div>
-
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                      requiresTwoPhase
-                        ? "bg-amber-500/10 text-amber-300 ring-1 ring-inset ring-amber-500/25"
-                        : "bg-emerald-500/10 text-emerald-300 ring-1 ring-inset ring-emerald-500/25"
-                    }`}
-                  >
-                    {requiresTwoPhase ? "Modo 2 Fases (Rostro → EPP)" : "Validación Simultánea"}
-                  </span>
+                  <Badge
+                    variant={requiresTwoPhase ? "yellow" : "green"}
+                    label={requiresTwoPhase ? "2 Fases (Rostro → EPP)" : "1 Paso Simultáneo"}
+                  />
                 </div>
 
-                {/* Pills de EPP requerido */}
-                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] font-medium text-slate-400">Exige:</span>
+                {/* EPP Exigido en el área */}
+                <HStack gap={2} vAlign="center" wrap="wrap">
+                  <Text type="supporting">EPP obligatorio:</Text>
                   {requiredItems.length > 0 ? (
                     requiredItems.map(({ label, icon: Icon }) => (
-                      <span
+                      <Badge
                         key={label}
-                        className="inline-flex items-center gap-1 rounded-lg bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-200 ring-1 ring-inset ring-white/5"
-                      >
-                        <Icon className="h-3 w-3 text-indigo-400" />
-                        {label}
-                      </span>
+                        variant="neutral"
+                        icon={<Icon className="h-3 w-3" />}
+                        label={label}
+                      />
                     ))
                   ) : (
-                    <span className="text-[11px] text-emerald-400">Solo presencia</span>
+                    <Badge variant="green" label="Solo presencia" />
                   )}
-                </div>
-              </div>
+                </HStack>
 
-              {/* Visor de Cámara */}
-              <div className="p-4 sm:p-5">
-                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-950 ring-1 ring-white/10">
+                {/* Visor de Cámara */}
+                <div
+                  style={{ borderColor: "var(--color-border-subtle)" }}
+                  className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border bg-black"
+                >
                   {cameraError ? (
-                    <div className="flex h-full flex-col items-center justify-center p-6 text-center text-xs text-slate-400">
-                      <Camera className="mb-2 h-8 w-8 text-slate-600" />
-                      <p>{cameraError}</p>
+                    <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+                      <Camera className="mb-2 h-8 w-8 opacity-50" />
+                      <Text type="supporting">{cameraError}</Text>
                     </div>
                   ) : (
                     <video
@@ -743,7 +756,11 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                   {/* Píldora superior de estado */}
                   <div className="absolute inset-x-3 top-3.5 flex justify-center">
                     <div
-                      className={`inline-flex max-w-full items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold shadow-lg backdrop-blur-md ${pillStyles}`}
+                      style={{
+                        backgroundColor: "rgba(18, 18, 18, 0.88)",
+                        borderColor: "var(--color-border-subtle)",
+                      }}
+                      className="inline-flex max-w-full items-center gap-2 rounded-full border px-3.5 py-1.5 shadow-md backdrop-blur-md"
                     >
                       <span
                         className={`h-2 w-2 shrink-0 rounded-full ${
@@ -753,10 +770,12 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                             ? "animate-pulse bg-amber-400"
                             : pillTone === "red"
                             ? "bg-rose-400"
-                            : "bg-indigo-400"
+                            : "bg-neutral-400"
                         }`}
                       />
-                      <span className="truncate">{statusPill}</span>
+                      <Text type="label" maxLines={1}>
+                        {statusPill}
+                      </Text>
                     </div>
                   </div>
 
@@ -774,27 +793,29 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
                   {/* Tarjeta flotante de empleado identificado */}
                   {identifiedProfile && (
-                    <div className="absolute inset-x-3 bottom-3.5 flex items-center justify-between rounded-2xl border border-emerald-500/40 bg-slate-950/90 px-4 py-2.5 shadow-xl backdrop-blur-md">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
-                          <UserCheck className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-bold text-white">
+                    <div
+                      style={{
+                        backgroundColor: "rgba(18, 18, 18, 0.92)",
+                        borderColor: "var(--color-border-subtle)",
+                      }}
+                      className="absolute inset-x-3 bottom-3.5 flex items-center justify-between rounded-xl border px-4 py-2.5 shadow-lg backdrop-blur-md"
+                    >
+                      <HStack gap={2} vAlign="center">
+                        <UserCheck className="h-4 w-4 shrink-0 text-emerald-400" />
+                        <VStack gap={0}>
+                          <Text type="label" maxLines={1}>
                             {identifiedProfile.full_name}
-                          </p>
-                          <p className="truncate text-[11px] text-slate-400">
+                          </Text>
+                          <Text type="supporting" maxLines={1}>
                             {identifiedProfile.job_title}
                             {identifiedSimilarity
                               ? ` · ${(identifiedSimilarity * 100).toFixed(0)}% coincidencia`
                               : ""}
-                          </p>
-                        </div>
-                      </div>
+                          </Text>
+                        </VStack>
+                      </HStack>
                       {stage === "PHASE2_EQUIPPING" && (
-                        <span className="ml-2 shrink-0 rounded-xl bg-amber-500/20 px-2.5 py-1 font-mono text-xs font-bold text-amber-300 ring-1 ring-inset ring-amber-500/30">
-                          {equipCountdown}s
-                        </span>
+                        <Badge variant="warning" label={`${equipCountdown}s`} />
                       )}
                     </div>
                   )}
@@ -804,38 +825,39 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                 </div>
 
                 {/* Botones Principales Entrada / Salida */}
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    disabled={!cameraReady || submitting}
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    width="100%"
+                    icon={<LogIn className="h-4 w-4" />}
+                    isDisabled={!cameraReady || submitting}
+                    isLoading={submitting}
+                    label={submitting ? "Verificando..." : "Registrar Entrada"}
                     onClick={() => handleMarkAttendance("ENTRY")}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-600/25 transition hover:from-indigo-500 hover:to-blue-500 active:scale-[0.99] disabled:opacity-50"
-                  >
-                    <LogIn className="h-4 w-4" />
-                    {submitting ? "Verificando..." : "Entrada"}
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={!cameraReady || submitting}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    width="100%"
+                    icon={<LogOut className="h-4 w-4" />}
+                    isDisabled={!cameraReady || submitting}
+                    label="Registrar Salida"
                     onClick={() => handleMarkAttendance("EXIT")}
-                    className="flex items-center justify-center gap-2 rounded-2xl border border-slate-700/90 bg-slate-800/90 py-3.5 text-sm font-bold text-slate-100 transition hover:border-amber-500/50 hover:bg-slate-800 active:scale-[0.99] disabled:opacity-50"
-                  >
-                    <LogOut className="h-4 w-4 text-amber-400" />
-                    Salida
-                  </button>
+                  />
                 </div>
 
+                <Divider />
+
                 {/* Acciones Secundarias */}
-                <div className="mt-3 flex items-center justify-between pt-1 text-xs">
-                  <button
-                    type="button"
+                <HStack gap={2} hAlign="between" vAlign="center">
+                  <Button
+                    label="Reiniciar lectura"
+                    variant="ghost"
+                    size="sm"
+                    icon={<RefreshCw className="h-3.5 w-3.5" />}
                     onClick={() => resetBiometricCycle()}
-                    className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    Reiniciar lectura
-                  </button>
+                  />
 
                   <div>
                     <input
@@ -845,422 +867,377 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                       onChange={handleFileUpload}
                       className="hidden"
                     />
-                    <button
-                      type="button"
+                    <Button
+                      label="Probar con Foto"
+                      variant="secondary"
+                      size="sm"
+                      icon={<Upload className="h-3.5 w-3.5" />}
+                      isDisabled={submitting}
                       onClick={() => fileInputRef.current?.click()}
-                      disabled={submitting}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700/80 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-indigo-500/50 hover:text-white disabled:opacity-50"
-                    >
-                      <Upload className="h-3.5 w-3.5 text-indigo-400" />
-                      Probar con Foto
-                    </button>
+                    />
                   </div>
-                </div>
-              </div>
-            </div>
+                </HStack>
+              </VStack>
+            </Card>
 
             {scanError && (
-              <div className="mt-4 flex items-center gap-2.5 rounded-2xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-xs text-rose-200">
-                <AlertTriangle className="h-4 w-4 shrink-0 text-rose-400" />
-                <span>{scanError}</span>
+              <div className="mt-4">
+                <Banner
+                  status="error"
+                  title="Marcaje no completado"
+                  description={scanError}
+                />
               </div>
             )}
           </div>
 
-          {/* Columna Derecha: Resultado Compacto en Cuadrícula 2x3 */}
+          {/* Columna Derecha: Resultado de Validación */}
           <div className="lg:col-span-5">
-            <div className="rounded-3xl border border-slate-800/90 bg-slate-900/90 p-5 shadow-xl">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Resultado de Validación
-                </h2>
-                {lastResult && (
-                  <span className="rounded-full bg-slate-800 px-2.5 py-0.5 font-mono text-[11px] text-slate-300">
-                    IA {(lastResult.confidence * 100).toFixed(0)}%
-                  </span>
-                )}
-              </div>
+            <Card padding={5}>
+              <VStack gap={4}>
+                <HStack gap={2} hAlign="between" vAlign="center">
+                  <Heading level={3}>Resultado de Validación</Heading>
+                  {lastResult && (
+                    <Badge
+                      variant="neutral"
+                      label={`IA ${(lastResult.confidence * 100).toFixed(0)}%`}
+                    />
+                  )}
+                </HStack>
 
-              {!lastResult ? (
-                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-6 text-center">
-                  <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-800/80 text-slate-400">
-                    <ShieldCheck className="h-5 w-5" />
-                  </div>
-                  <p className="text-xs font-semibold text-slate-300">
-                    Terminal lista para escaneo
-                  </p>
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
-                    1. Mira a la cámara sin mascarilla para identificarte.
-                    <br />
-                    2. Colócate el EPP requerido sin salir del marco y presiona{" "}
-                    <span className="font-semibold text-slate-300">Entrada</span>.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Banner Principal de Estado */}
-                  <div
-                    className={`rounded-2xl border p-4 ${
-                      lastResult.is_compliant
-                        ? "border-emerald-500/30 bg-emerald-500/10"
-                        : "border-rose-500/30 bg-rose-500/10"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      {lastResult.is_compliant ? (
-                        <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-emerald-400" />
-                      ) : (
-                        <ShieldAlert className="mt-0.5 h-6 w-6 shrink-0 text-rose-400" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p
-                            className={`text-sm font-bold ${
-                              lastResult.is_compliant ? "text-emerald-300" : "text-rose-300"
-                            }`}
-                          >
-                            {lastResult.is_compliant
-                              ? `${lastResult.event_type === "EXIT" ? "Salida" : "Entrada"} Autorizada`
-                              : "Acceso Rechazado"}
-                          </p>
-                          <span className="rounded-md bg-slate-950/60 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-300">
-                            {lastResult.event_type === "EXIT" ? "Salida" : "Entrada"}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 truncate text-xs font-semibold text-white">
-                          {lastResult.user_full_name}
-                        </p>
-                        <p className="text-[11px] text-slate-400">
-                          {lastResult.zone_name} ·{" "}
-                          {new Date(lastResult.created_at).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
-                        {!lastResult.is_compliant &&
-                          lastResult.missing_items &&
-                          lastResult.missing_items.length > 0 && (
-                            <div className="mt-2 rounded-lg bg-rose-950/70 px-2.5 py-1.5 text-[11px] font-medium text-rose-200">
-                              Falta: {lastResult.missing_items.join(", ")}
-                            </div>
-                          )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Cuadrícula Compacta 2x3 de Verificaciones */}
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {[
-                      {
-                        label:
-                          lastResult.recognition_method === "face_biometric"
-                            ? `Rostro (${Math.round((lastResult.face_similarity || 0.85) * 100)}%)`
-                            : "Sesión Activa",
-                        ok: lastResult.person_detected,
-                        sub: "Identidad",
-                      },
-                      {
-                        label: lastResult.is_live_person ? "Verificada" : "No en vivo",
-                        ok: lastResult.is_live_person,
-                        sub: "Prueba de vida",
-                      },
-                      {
-                        label: lastResult.has_helmet ? "Detectado" : "Ausente",
-                        ok: lastResult.has_helmet,
-                        sub: "Casco",
-                      },
-                      {
-                        label: lastResult.has_glasses ? "Detectados" : "Ausentes",
-                        ok: lastResult.has_glasses,
-                        sub: "Lentes",
-                      },
-                      {
-                        label: lastResult.has_mask ? "Detectada" : "Ausente",
-                        ok: lastResult.has_mask,
-                        sub: "Mascarilla",
-                      },
-                      {
-                        label: lastResult.has_vest ? "Detectado" : "Ausente",
-                        ok: lastResult.has_vest,
-                        sub: "Chaleco",
-                      },
-                    ].map((cell) => (
-                      <div
-                        key={cell.sub}
-                        className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${
-                          cell.ok
-                            ? "border-emerald-500/25 bg-emerald-500/5"
-                            : "border-slate-800 bg-slate-950/60"
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
-                            {cell.sub}
-                          </p>
-                          <p
-                            className={`truncate text-xs font-semibold ${
-                              cell.ok ? "text-emerald-300" : "text-slate-400"
-                            }`}
-                          >
-                            {cell.label}
-                          </p>
-                        </div>
-                        {cell.ok ? (
-                          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                {!lastResult ? (
+                  <Card variant="muted" padding={5}>
+                    <VStack gap={2} hAlign="center">
+                      <ShieldCheck className="h-6 w-6 opacity-70" />
+                      <Text type="label">Terminal lista para escaneo</Text>
+                      <Text type="supporting" justify="center">
+                        1. Mira a la cámara sin mascarilla para identificarte.
+                        <br />
+                        2. Colócate el EPP requerido y pulsa Registrar Entrada.
+                      </Text>
+                    </VStack>
+                  </Card>
+                ) : (
+                  <VStack gap={4}>
+                    <Banner
+                      status={lastResult.is_compliant ? "success" : "error"}
+                      icon={
+                        lastResult.is_compliant ? (
+                          <ShieldCheck className="h-5 w-5" />
                         ) : (
-                          <XCircle className="h-4 w-4 shrink-0 text-rose-400/80" />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+                          <ShieldAlert className="h-5 w-5" />
+                        )
+                      }
+                      title={
+                        lastResult.is_compliant
+                          ? `${lastResult.event_type === "EXIT" ? "Salida" : "Entrada"} Autorizada`
+                          : "Acceso Rechazado"
+                      }
+                      description={`${lastResult.user_full_name} · ${lastResult.zone_name}${
+                        !lastResult.is_compliant && lastResult.missing_items?.length
+                          ? ` · Falta: ${lastResult.missing_items.join(", ")}`
+                          : ""
+                      }`}
+                    />
+
+                    {/* Cuadrícula 2x3 de Verificaciones */}
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {[
+                        {
+                          label:
+                            lastResult.recognition_method === "face_biometric"
+                              ? `Rostro (${Math.round((lastResult.face_similarity || 0.85) * 100)}%)`
+                              : "Sesión Activa",
+                          ok: lastResult.person_detected,
+                          sub: "Identidad",
+                        },
+                        {
+                          label: lastResult.is_live_person ? "Verificada" : "No en vivo",
+                          ok: lastResult.is_live_person,
+                          sub: "Prueba de vida",
+                        },
+                        {
+                          label: lastResult.has_helmet ? "Detectado" : "Ausente",
+                          ok: lastResult.has_helmet,
+                          sub: "Casco",
+                        },
+                        {
+                          label: lastResult.has_glasses ? "Detectados" : "Ausentes",
+                          ok: lastResult.has_glasses,
+                          sub: "Lentes",
+                        },
+                        {
+                          label: lastResult.has_mask ? "Detectada" : "Ausente",
+                          ok: lastResult.has_mask,
+                          sub: "Mascarilla",
+                        },
+                        {
+                          label: lastResult.has_vest ? "Detectado" : "Ausente",
+                          ok: lastResult.has_vest,
+                          sub: "Chaleco",
+                        },
+                      ].map((cell) => (
+                        <Card key={cell.sub} variant="muted" padding={3}>
+                          <HStack gap={2} hAlign="between" vAlign="center">
+                            <VStack gap={0.5}>
+                              <Text type="supporting">{cell.sub}</Text>
+                              <Text type="label" maxLines={1}>
+                                {cell.label}
+                              </Text>
+                            </VStack>
+                            {cell.ok ? (
+                              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                            ) : (
+                              <XCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                            )}
+                          </HStack>
+                        </Card>
+                      ))}
+                    </div>
+                  </VStack>
+                )}
+              </VStack>
+            </Card>
           </div>
         </div>
 
         {/* Bitácora Reciente */}
-        <div className="mt-6 rounded-3xl border border-slate-800/90 bg-slate-900/90 p-5 sm:p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <History className="h-4 w-4 text-indigo-400" />
-              <h2 className="text-sm font-bold text-white">Bitácora Reciente de Terminal</h2>
-            </div>
-            <span className="text-xs text-slate-500">{history.length} registros</span>
-          </div>
+        <div className="mt-6">
+          <Card padding={5}>
+            <VStack gap={4}>
+              <HStack gap={2} hAlign="between" vAlign="center">
+                <HStack gap={2} vAlign="center">
+                  <History className="h-4 w-4" />
+                  <Heading level={3}>Bitácora Reciente de Terminal</Heading>
+                </HStack>
+                <Text type="supporting">{history.length} registros</Text>
+              </HStack>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
-                  <th className="py-2.5 pr-3">Fecha / Hora</th>
-                  <th className="py-2.5 px-3">Colaborador</th>
-                  <th className="py-2.5 px-3">Área</th>
-                  <th className="py-2.5 px-3">Tipo</th>
-                  <th className="py-2.5 px-3">Resultado</th>
-                  <th className="py-2.5 pl-3 text-right">EPP Detectado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {history.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-500">
-                      Aún no hay marcajes registrados.
-                    </td>
-                  </tr>
-                ) : (
-                  history.map((item) => {
-                    const detectedTags = [
-                      item.has_helmet ? "Casco" : null,
-                      item.has_glasses ? "Lentes" : null,
-                      item.has_mask ? "Mascarilla" : null,
-                      item.has_vest ? "Chaleco" : null,
-                    ].filter(Boolean);
-
-                    return (
-                      <tr key={item.id} className="hover:bg-slate-800/35">
-                        <td className="whitespace-nowrap py-3 pr-3 text-slate-300">
-                          {new Date(item.created_at).toLocaleString([], {
-                            day: "2-digit",
-                            month: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </td>
-                        <td className="py-3 px-3 font-semibold text-white">
-                          {item.user_full_name}
-                        </td>
-                        <td className="py-3 px-3 text-indigo-300">{item.zone_name}</td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
-                              item.event_type === "EXIT"
-                                ? "bg-amber-500/15 text-amber-300"
-                                : "bg-sky-500/15 text-sky-300"
-                            }`}
-                          >
-                            {item.event_type === "EXIT" ? "Salida" : "Entrada"}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                              item.is_compliant
-                                ? "bg-emerald-500/15 text-emerald-300"
-                                : "bg-rose-500/15 text-rose-300"
-                            }`}
-                          >
-                            {item.is_compliant ? "Aprobado" : "Rechazado"}
-                          </span>
-                        </td>
-                        <td className="py-3 pl-3 text-right text-slate-400">
-                          {detectedTags.length > 0 ? detectedTags.join(" · ") : "Ninguno"}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr
+                      style={{ borderColor: "var(--color-border-subtle)" }}
+                      className="border-b uppercase"
+                    >
+                      <th className="py-2.5 pr-3">
+                        <Text type="supporting">Fecha / Hora</Text>
+                      </th>
+                      <th className="py-2.5 px-3">
+                        <Text type="supporting">Colaborador</Text>
+                      </th>
+                      <th className="py-2.5 px-3">
+                        <Text type="supporting">Área</Text>
+                      </th>
+                      <th className="py-2.5 px-3">
+                        <Text type="supporting">Tipo</Text>
+                      </th>
+                      <th className="py-2.5 px-3">
+                        <Text type="supporting">Resultado</Text>
+                      </th>
+                      <th className="py-2.5 pl-3 text-right">
+                        <Text type="supporting">EPP Detectado</Text>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody
+                    style={{ borderColor: "var(--color-border-subtle)" }}
+                    className="divide-y"
+                  >
+                    {history.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-6 text-center">
+                          <Text type="supporting">Aún no hay marcajes registrados.</Text>
                         </td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                    ) : (
+                      history.map((item) => {
+                        const detectedTags = [
+                          item.has_helmet ? "Casco" : null,
+                          item.has_glasses ? "Lentes" : null,
+                          item.has_mask ? "Mascarilla" : null,
+                          item.has_vest ? "Chaleco" : null,
+                        ].filter(Boolean);
+
+                        return (
+                          <tr key={item.id}>
+                            <td className="whitespace-nowrap py-3 pr-3">
+                              <Text type="supporting" hasTabularNumbers>
+                                {new Date(item.created_at).toLocaleString([], {
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </Text>
+                            </td>
+                            <td className="py-3 px-3">
+                              <Text type="label">{item.user_full_name}</Text>
+                            </td>
+                            <td className="py-3 px-3">
+                              <Text type="supporting">{item.zone_name}</Text>
+                            </td>
+                            <td className="py-3 px-3">
+                              <Badge
+                                variant={item.event_type === "EXIT" ? "orange" : "blue"}
+                                label={item.event_type === "EXIT" ? "Salida" : "Entrada"}
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <Badge
+                                variant={item.is_compliant ? "success" : "error"}
+                                label={item.is_compliant ? "Aprobado" : "Rechazado"}
+                              />
+                            </td>
+                            <td className="py-3 pl-3 text-right">
+                              <Text type="supporting">
+                                {detectedTags.length > 0 ? detectedTags.join(" · ") : "Ninguno"}
+                              </Text>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </VStack>
+          </Card>
         </div>
       </div>
 
-      {/* Modal Enrolamiento Biométrico con Cámara Integrada + Subida de Foto */}
-      {enrollOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
-          <form
-            onSubmit={handleEnrollFaceSubmit}
-            className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-700/80 bg-slate-900 shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
-              <div className="flex items-center gap-2">
-                <ScanFace className="h-5 w-5 text-emerald-400" />
-                <h3 className="text-sm font-bold text-white">Registrar Perfil Biométrico</h3>
-              </div>
-              <button
-                type="button"
-                onClick={closeEnrollModal}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+      {/* Modal Enrolamiento Biométrico */}
+      <Dialog
+        isOpen={enrollOpen}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && !enrolling) closeEnrollModal();
+        }}
+        width={480}
+        purpose="form"
+      >
+        <form onSubmit={handleEnrollFaceSubmit}>
+          <VStack gap={4}>
+            <DialogHeader
+              title="Registrar Perfil Biométrico"
+              subtitle="Captura el rostro descubierto para reconocimiento facial automático"
+              onOpenChange={(isOpen) => {
+                if (!isOpen && !enrolling) closeEnrollModal();
+              }}
+            />
+
+            <SegmentedControl
+              label="Método de captura biométrica"
+              value={enrollMode}
+              layout="fill"
+              onChange={(val) => setEnrollMode(val as "camera" | "photo")}
+            >
+              <SegmentedControlItem
+                value="camera"
+                label="Cámara en vivo"
+                icon={<Camera className="h-3.5 w-3.5" />}
+              />
+              <SegmentedControlItem
+                value="photo"
+                label="Desde fotografía"
+                icon={<ImageIcon className="h-3.5 w-3.5" />}
+              />
+            </SegmentedControl>
+
+            {enrollMode === "camera" ? (
+              <div
+                style={{ borderColor: "var(--color-border-subtle)" }}
+                className="relative mx-auto aspect-[4/3] w-full overflow-hidden rounded-2xl border bg-black"
               >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4 px-5 py-4 text-xs">
-              {/* Selector de método: Cámara en vivo o Foto de galería */}
-              <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-950 p-1">
-                <button
-                  type="button"
-                  onClick={() => setEnrollMode("camera")}
-                  className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
-                    enrollMode === "camera"
-                      ? "bg-slate-800 text-white shadow"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <Camera className="h-3.5 w-3.5" />
-                  Cámara en vivo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEnrollMode("photo")}
-                  className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
-                    enrollMode === "photo"
-                      ? "bg-slate-800 text-white shadow"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <ImageIcon className="h-3.5 w-3.5" />
-                  Desde fotografía
-                </button>
-              </div>
-
-              {enrollMode === "camera" ? (
-                <div className="relative mx-auto aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-950 ring-1 ring-white/10">
-                  <video
-                    ref={enrollVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="h-full w-full -scale-x-100 object-cover"
-                  />
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                    <div className="h-36 w-28 rounded-full border-2 border-dashed border-emerald-400/75" />
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <input
-                    ref={enrollPhotoInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] || null;
-                      setEnrollPhotoFile(f);
-                      if (enrollPhotoPreview) URL.revokeObjectURL(enrollPhotoPreview);
-                      setEnrollPhotoPreview(f ? URL.createObjectURL(f) : null);
-                    }}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => enrollPhotoInputRef.current?.click()}
-                    className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-950/70 p-4 text-center transition hover:border-emerald-500/50"
-                  >
-                    {enrollPhotoPreview ? (
-                      <img
-                        src={enrollPhotoPreview}
-                        alt="Vista previa rostro"
-                        className="h-32 w-32 rounded-2xl object-cover ring-2 ring-emerald-500/40"
-                      />
-                    ) : (
-                      <>
-                        <Upload className="mb-1.5 h-6 w-6 text-emerald-400" />
-                        <span className="font-semibold text-slate-200">
-                          Seleccionar foto frontal del colaborador
-                        </span>
-                        <span className="mt-0.5 text-[11px] text-slate-500">
-                          JPG, PNG o WEBP · Sin mascarilla ni lentes oscuros
-                        </span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
-
-              {user.role === "admin" && allUsers.length > 0 && (
-                <div>
-                  <label className="mb-1 block font-medium text-slate-300">
-                    Colaborador a registrar
-                  </label>
-                  <select
-                    value={enrollTargetUserId}
-                    onChange={(e) => setEnrollTargetUserId(Number(e.target.value))}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white focus:border-emerald-500 focus:outline-none"
-                  >
-                    {allUsers.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.full_name} ({u.email})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="mb-1 block font-medium text-slate-300">
-                  Código / Carné de empleado (opcional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej. 2500587"
-                  value={enrollCode}
-                  onChange={(e) => setEnrollCode(e.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                <video
+                  ref={enrollVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="h-full w-full -scale-x-100 object-cover"
                 />
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="h-36 w-28 rounded-full border-2 border-dashed border-emerald-400/80" />
+                </div>
               </div>
-            </div>
+            ) : (
+              <div>
+                <input
+                  ref={enrollPhotoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setEnrollPhotoFile(f);
+                    if (enrollPhotoPreview) URL.revokeObjectURL(enrollPhotoPreview);
+                    setEnrollPhotoPreview(f ? URL.createObjectURL(f) : null);
+                  }}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => enrollPhotoInputRef.current?.click()}
+                  style={{
+                    backgroundColor: "var(--color-background-muted)",
+                    borderColor: "var(--color-border-subtle)",
+                  }}
+                  className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed p-5 text-center transition hover:opacity-90"
+                >
+                  {enrollPhotoPreview ? (
+                    <img
+                      src={enrollPhotoPreview}
+                      alt="Vista previa rostro"
+                      className="h-32 w-32 rounded-2xl object-cover"
+                    />
+                  ) : (
+                    <VStack gap={1.5} hAlign="center">
+                      <Upload className="h-6 w-6" />
+                      <Text type="label">Seleccionar foto frontal del colaborador</Text>
+                      <Text type="supporting">
+                        JPG, PNG o WEBP · Sin mascarilla ni lentes oscuros
+                      </Text>
+                    </VStack>
+                  )}
+                </button>
+              </div>
+            )}
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-800 bg-slate-950/60 px-5 py-3.5">
-              <button
-                type="button"
+            {user.role === "admin" && allUsers.length > 0 && (
+              <Selector
+                label="Colaborador a registrar"
+                hasSearch
+                width="100%"
+                options={userOptions}
+                value={String(enrollTargetUserId)}
+                onChange={(val) => setEnrollTargetUserId(Number(val))}
+              />
+            )}
+
+            <TextInput
+              label="Código o carné de empleado"
+              isOptional
+              placeholder="Ej. 2500587"
+              value={enrollCode}
+              onChange={setEnrollCode}
+              width="100%"
+            />
+
+            <HStack gap={2} hAlign="end">
+              <Button
+                label="Cancelar"
+                variant="secondary"
+                isDisabled={enrolling}
                 onClick={closeEnrollModal}
-                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white"
-              >
-                Cancelar
-              </button>
-              <button
+              />
+              <Button
                 type="submit"
-                disabled={enrolling}
-                className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {enrolling ? "Procesando rostro..." : "Guardar Perfil"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+                variant="primary"
+                isLoading={enrolling}
+                label={enrolling ? "Procesando rostro..." : "Guardar Perfil"}
+              />
+            </HStack>
+          </VStack>
+        </form>
+      </Dialog>
 
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>

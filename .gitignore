@@ -1,27 +1,14 @@
-# Entornos y secretos
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
 .env
 .env.*
 !.env.example
-
-# Python
+*.db
+*.sqlite
+*.sqlite3
+*.log
 __pycache__/
 *.py[cod]
-*$py.class
-venv/
-.venv/
-
-# Modelos pesados de IA
-*.pt
-*.onnx
-*.weights
-
-# Node / Frontend
-frontend/node_modules/
-frontend/dist/
-.vite/
-
-# Sistema / IDEs
 .DS_Store
-.vscode/
-.idea/
-backend/uploads/

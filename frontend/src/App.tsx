@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Divider } from "@astryxdesign/core/Divider";
+import { Heading } from "@astryxdesign/core/Heading";
+import { HStack } from "@astryxdesign/core/HStack";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Spinner } from "@astryxdesign/core/Spinner";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { VStack } from "@astryxdesign/core/VStack";
 import { api, User } from "./lib/api";
 import { CameraScanner } from "./features/CameraScanner";
 import { AdminDashboard } from "./features/AdminDashboard";
@@ -9,12 +20,14 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState<"scanner" | "admin">("scanner");
 
-  const [isRegister, setIsRegister] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const isRegister = authMode === "register";
 
   useEffect(() => {
     api
@@ -52,111 +65,120 @@ export function App() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-sm text-slate-400">
-        Verificando sesión segura...
+      <div
+        style={{ backgroundColor: "var(--color-background-body)" }}
+        className="flex min-h-screen items-center justify-center px-4"
+      >
+        <HStack gap={3} vAlign="center">
+          <Spinner size="sm" />
+          <Text type="supporting">Verificando sesión segura...</Text>
+        </HStack>
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
-        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-8 shadow-2xl">
-          <div className="mb-6 flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600/20 text-indigo-400">
-              <ShieldCheck className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-white">Control de Marcaje EPP</h1>
-              <p className="text-xs text-slate-400">
-                Verificación biométrica y equipo de seguridad
-              </p>
-            </div>
-          </div>
-
-          <form onSubmit={handleAuthSubmit} className="space-y-4">
-            {isRegister && (
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-300">
-                  Nombre completo
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:outline-none"
-                />
+      <div
+        style={{ backgroundColor: "var(--color-background-body)" }}
+        className="flex min-h-screen items-center justify-center px-4 py-8"
+      >
+        <Card maxWidth={440} width="100%" padding={6} elevation="low">
+          <VStack gap={5}>
+            <HStack gap={3} vAlign="center">
+              <div
+                style={{
+                  backgroundColor: "var(--color-background-muted)",
+                  borderColor: "var(--color-border-subtle)",
+                }}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border"
+              >
+                <ShieldCheck className="h-5 w-5" />
               </div>
-            )}
+              <VStack gap={0.5}>
+                <Heading level={2}>Control de Marcaje EPP</Heading>
+                <Text type="supporting">
+                  Verificación biométrica y cumplimiento de seguridad
+                </Text>
+              </VStack>
+            </HStack>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-300">
-                Correo electrónico
-              </label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-300">
-                Contraseña
-              </label>
-              <input
-                type="password"
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
-
-            {authError && (
-              <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-300">
-                {authError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/25 transition hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {submitting
-                ? "Procesando..."
-                : isRegister
-                ? "Crear cuenta e ingresar"
-                : "Iniciar sesión"}
-            </button>
-          </form>
-
-          <div className="mt-5 text-center">
-            <button
-              type="button"
-              onClick={() => {
-                setIsRegister(!isRegister);
+            <SegmentedControl
+              label="Modo de autenticación"
+              value={authMode}
+              layout="fill"
+              onChange={(val) => {
+                setAuthMode(val as "login" | "register");
                 setAuthError("");
               }}
-              className="text-xs text-slate-400 hover:text-indigo-400"
             >
-              {isRegister
-                ? "¿Ya tienes cuenta? Inicia sesión"
-                : "¿No tienes cuenta? Regístrate aquí"}
-            </button>
-          </div>
-        </div>
+              <SegmentedControlItem value="login" label="Iniciar sesión" />
+              <SegmentedControlItem value="register" label="Crear cuenta" />
+            </SegmentedControl>
+
+            <Divider />
+
+            <form onSubmit={handleAuthSubmit}>
+              <VStack gap={4}>
+                {isRegister && (
+                  <TextInput
+                    label="Nombre completo"
+                    placeholder="Ej. Marcos de Páz"
+                    value={fullName}
+                    onChange={setFullName}
+                    isRequired
+                    width="100%"
+                  />
+                )}
+
+                <TextInput
+                  type="email"
+                  label="Correo electrónico"
+                  placeholder="colaborador@empresa.com"
+                  value={email}
+                  onChange={setEmail}
+                  autoComplete="email"
+                  isRequired
+                  width="100%"
+                />
+
+                <TextInput
+                  type="password"
+                  label="Contraseña"
+                  placeholder="Mínimo 6 caracteres"
+                  value={password}
+                  onChange={setPassword}
+                  autoComplete={isRegister ? "new-password" : "current-password"}
+                  isRequired
+                  width="100%"
+                />
+
+                {authError && (
+                  <Banner
+                    status="error"
+                    title="No se pudo iniciar sesión"
+                    description={authError}
+                  />
+                )}
+
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="lg"
+                  width="100%"
+                  isLoading={submitting}
+                  label={isRegister ? "Crear cuenta e ingresar" : "Iniciar sesión"}
+                />
+              </VStack>
+            </form>
+          </VStack>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div style={{ backgroundColor: "var(--color-background-body)" }} className="min-h-screen">
       {user.role === "admin" && activeView === "admin" ? (
         <AdminDashboard
           user={user}

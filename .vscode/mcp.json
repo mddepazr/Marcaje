@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "astryx": {
+      "command": "node",
+      "args": ["frontend/node_modules/@astryxdesign/cli/clients/cli/bin/astryx.mjs", "mcp"]
+    }
+  }
+}
