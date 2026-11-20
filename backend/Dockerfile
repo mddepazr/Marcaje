@@ -1,4 +1,4 @@
-# Etapa 1: Exportar modelo a ONNX (aquí se usa PyTorch solo para compilar)
+# Etapa 1: Exportar modelo a ONNX (aquí se usa PyTorch y CLIP solo para compilar)
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
@@ -7,13 +7,14 @@ ENV XDG_CACHE_HOME=/opt/ml_cache \
     YOLO_CONFIG_DIR=/opt/ml_cache/ultralytics
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libgl1 \
+    libglib2.0-0 libgl1 git \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/ml_cache
 
 COPY bake_model.py .
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir ultralytics onnx onnxruntime opencv-python-headless && \
+    pip install --no-cache-dir git+https://github.com/ultralytics/CLIP.git && \
     python bake_model.py
 
 # Etapa 2: Imagen final ultra ligera (~120 MB RAM, SIN PyTorch ni Ultralytics)
