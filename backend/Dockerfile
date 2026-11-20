@@ -15,11 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/ml_cache /app/uploads
 
-COPY requirements.txt .
+COPY requirements.txt bake_model.py ./
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r requirements.txt
-
-RUN cd /opt/ml_cache && python -c "from ultralytics import YOLOWorld; m = YOLOWorld('yolov8s-worldv2.pt'); m.set_classes(['person', 'hard hat', 'safety helmet', 'safety glasses', 'glasses', 'face mask', 'surgical mask', 'cell phone', 'laptop', 'monitor'])"
+    pip install --no-cache-dir -r requirements.txt onnx onnxruntime && \
+    python bake_model.py && \
+    rm -f yolov8s-worldv2.pt yolov8s-worldv2.onnx
 
 COPY . .
 
