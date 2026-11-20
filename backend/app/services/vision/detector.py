@@ -116,10 +116,10 @@ class PPEDetectorService:
 
         detections = []
         for idx in np.array(indices).flatten():
-            bx1 = max(0.0, (x1[idx] - pad_x) / scale)
-            by1 = max(0.0, (y1[idx] - pad_y) / scale)
-            bx2 = min(float(orig_w), (x1[idx] + w[idx] - pad_x) / scale)
-            by2 = min(float(orig_h), (y1[idx] + h[idx] - pad_y) / scale)
+            bx1 = float(max(0.0, (x1[idx] - pad_x) / scale))
+            by1 = float(max(0.0, (y1[idx] - pad_y) / scale))
+            bx2 = float(min(float(orig_w), (x1[idx] + w[idx] - pad_x) / scale))
+            by2 = float(min(float(orig_h), (y1[idx] + h[idx] - pad_y) / scale))
             cid = int(class_ids[idx])
             label = self.classes[cid] if cid < len(self.classes) else f"class_{cid}"
             detections.append(
