@@ -42,11 +42,6 @@ function computeEyeAspectRatio(eye: Array<{ x: number; y: number }>): number {
   return (v1 + v2) / (2.0 * h);
 }
 
-/**
- * Análisis optimizado para celular:
- * - inputSize 192 + scoreThreshold 0.32: fluido en móviles y funciona en poca luz.
- * - Solo calcula el descriptor pesado de 128 puntos cuando computeDescriptor=true.
- */
 export async function analyzeVideoFaces(
   video: HTMLVideoElement,
   withLandmarks = true,
@@ -126,6 +121,36 @@ export async function analyzeVideoFaces(
       descriptor: [],
     },
   };
+}
+
+export async function extractDescriptorFromImageFile(file: File): Promise<number[]> {
+  await ensureFaceModelsLoaded();
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("No se pudo leer la imagen seleccionada."));
+      el.src = objectUrl;
+    });
+
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.3 });
+    const detections = await faceapi
+      .detectAllFaces(img, options)
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+
+    if (detections.length === 0) {
+      throw new Error("No se detectó ningún rostro claro en la foto. Usa una imagen frontal con buena luz.");
+    }
+    if (detections.length > 1) {
+      throw new Error("Se detectaron varios rostros en la foto. Sube una foto donde aparezca solo una persona.");
+    }
+
+    return Array.from(detections[0].descriptor);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export function matchFaceDescriptor(
