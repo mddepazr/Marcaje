@@ -22,6 +22,8 @@ TARGET_CLASSES = [
     "glasses",
     "face mask",
     "surgical mask",
+    "safety vest",
+    "vest",
     "cell phone",
     "laptop",
     "monitor",
@@ -31,6 +33,7 @@ SPOOF_LABELS = {"cell phone", "laptop", "monitor"}
 HELMET_LABELS = {"helmet", "hardhat", "hard hat", "safety helmet", "casco"}
 GLASSES_LABELS = {"glasses", "safety glasses", "goggles", "lentes", "gafas"}
 MASK_LABELS = {"mask", "face mask", "surgical mask", "mascarilla", "cubrebocas"}
+VEST_LABELS = {"vest", "safety vest", "high visibility vest", "chaleco", "waistcoat"}
 
 
 def enhance_contrast(pil_image: Image.Image, force: bool = False, brightness_threshold: float = 85.0) -> Image.Image:
@@ -85,6 +88,7 @@ class PPEDetectorService:
             has_helmet = False
             has_glasses = False
             has_mask = False
+            has_vest = False
             max_conf = 0.0
 
             for result in results:
@@ -109,13 +113,15 @@ class PPEDetectorService:
                         has_glasses = True
                     elif label in MASK_LABELS:
                         has_mask = True
+                    elif label in VEST_LABELS:
+                        has_vest = True
 
             for px1, py1, px2, py2 in person_boxes:
                 box_h = py2 - py1
                 crop_x1 = max(0, int(px1))
                 crop_y1 = max(0, int(py1))
                 crop_x2 = min(img_w, int(px2))
-                crop_y2 = min(img_h, int(py1 + box_h * 0.72))
+                crop_y2 = min(img_h, int(py1 + box_h * 0.78))
 
                 if crop_x2 - crop_x1 > 40 and crop_y2 - crop_y1 > 40:
                     head_crop = enhance_contrast(image.crop((crop_x1, crop_y1, crop_x2, crop_y2)), force=True)
@@ -143,9 +149,14 @@ class PPEDetectorService:
                             elif h_label in MASK_LABELS and h_conf >= 0.16:
                                 has_mask = True
                                 detections.append({"label": h_label, "confidence": h_conf, "bbox": full_bbox})
+                            elif h_label in VEST_LABELS and h_conf >= 0.16:
+                                has_vest = True
+                                detections.append({"label": h_label, "confidence": h_conf, "bbox": full_bbox})
 
         gc.collect()
-        is_compliant = person_detected and not spoof_device_detected and (has_helmet or has_glasses or has_mask)
+        is_compliant = person_detected and not spoof_device_detected and (
+            has_helmet or has_glasses or has_mask or has_vest
+        )
 
         return {
             "person_detected": person_detected,
@@ -153,6 +164,7 @@ class PPEDetectorService:
             "has_helmet": has_helmet,
             "has_glasses": has_glasses,
             "has_mask": has_mask,
+            "has_vest": has_vest,
             "is_compliant": is_compliant,
             "confidence": max_conf,
             "detections_raw": detections,

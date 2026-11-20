@@ -2,6 +2,7 @@ export interface ZoneRequirements {
   require_helmet: boolean;
   require_glasses: boolean;
   require_mask: boolean;
+  require_vest?: boolean;
 }
 
 export interface ScanDetections {
@@ -10,6 +11,7 @@ export interface ScanDetections {
   has_helmet: boolean;
   has_glasses: boolean;
   has_mask: boolean;
+  has_vest?: boolean;
 }
 
 export function getMissingPPE(scan: ScanDetections, rules: ZoneRequirements): string[] {
@@ -17,6 +19,7 @@ export function getMissingPPE(scan: ScanDetections, rules: ZoneRequirements): st
   if (rules.require_helmet && !scan.has_helmet) missing.push("Casco");
   if (rules.require_glasses && !scan.has_glasses) missing.push("Lentes");
   if (rules.require_mask && !scan.has_mask) missing.push("Mascarilla");
+  if (rules.require_vest && !scan.has_vest) missing.push("Chaleco");
   return missing;
 }
 

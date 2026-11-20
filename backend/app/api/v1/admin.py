@@ -6,8 +6,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
-from app.api.v1.marcaje import get_or_create_settings
-from app.db.models import AttendanceRecord, JobRole, User
+from app.api.v1.marcaje import ensure_default_zones, get_or_create_settings
+from app.db.models import AttendanceRecord, JobRole, User, WorkZone
 from app.db.session import get_db
 from app.schemas.admin import (
     AdminAttendanceOut,
@@ -18,7 +18,10 @@ from app.schemas.admin import (
     JobRoleOut,
     MarcajeSettingsOut,
     MarcajeSettingsUpdate,
+    WorkZoneCreate,
+    WorkZoneUpdate,
 )
+from app.schemas.marcaje import WorkZoneOut
 
 router = APIRouter(prefix="/admin", tags=["Administración"])
 
@@ -79,6 +82,78 @@ def create_job_role(
     db.commit()
     db.refresh(new_role)
     return new_role
+
+
+@router.get("/zones", response_model=list[WorkZoneOut])
+def list_all_zones(
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    ensure_default_zones(db)
+    return list(db.scalars(select(WorkZone).order_by(WorkZone.id.asc())).all())
+
+
+@router.post("/zones", response_model=WorkZoneOut, status_code=status.HTTP_201_CREATED)
+def create_work_zone(
+    payload: WorkZoneCreate,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    ensure_default_zones(db)
+    clean_name = payload.name.strip()
+    existing = db.scalar(select(WorkZone).where(func.lower(WorkZone.name) == clean_name.lower()))
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El área '{clean_name}' ya existe.",
+        )
+    zone = WorkZone(
+        name=clean_name,
+        description=payload.description.strip(),
+        require_helmet=payload.require_helmet,
+        require_glasses=payload.require_glasses,
+        require_mask=payload.require_mask,
+        require_vest=payload.require_vest,
+        min_confidence=payload.min_confidence,
+        is_active=True,
+    )
+    db.add(zone)
+    db.commit()
+    db.refresh(zone)
+    return zone
+
+
+@router.put("/zones/{zone_id}", response_model=WorkZoneOut)
+def update_work_zone(
+    zone_id: int,
+    payload: WorkZoneUpdate,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    zone = db.get(WorkZone, zone_id)
+    if not zone:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Área no encontrada.")
+
+    if payload.name is not None:
+        zone.name = payload.name.strip()
+    if payload.description is not None:
+        zone.description = payload.description.strip()
+    if payload.require_helmet is not None:
+        zone.require_helmet = payload.require_helmet
+    if payload.require_glasses is not None:
+        zone.require_glasses = payload.require_glasses
+    if payload.require_mask is not None:
+        zone.require_mask = payload.require_mask
+    if payload.require_vest is not None:
+        zone.require_vest = payload.require_vest
+    if payload.min_confidence is not None:
+        zone.min_confidence = payload.min_confidence
+    if payload.is_active is not None:
+        zone.is_active = payload.is_active
+
+    db.commit()
+    db.refresh(zone)
+    return zone
 
 
 @router.get("/settings", response_model=MarcajeSettingsOut)
@@ -155,7 +230,13 @@ def list_all_records(
 
     if search.strip():
         term = f"%{search.strip()}%"
-        stmt = stmt.where(or_(User.full_name.ilike(term), User.email.ilike(term)))
+        stmt = stmt.where(
+            or_(
+                User.full_name.ilike(term),
+                User.email.ilike(term),
+                AttendanceRecord.zone_name.ilike(term),
+            )
+        )
 
     rows = db.execute(stmt).all()
     return [
@@ -164,11 +245,16 @@ def list_all_records(
             user_id=user.id,
             user_full_name=user.full_name,
             user_email=user.email,
+            zone_name=rec.zone_name,
+            event_type=rec.event_type,
+            recognition_method=rec.recognition_method,
+            face_similarity=rec.face_similarity,
             person_detected=rec.person_detected,
             is_live_person=rec.is_live_person,
             has_helmet=rec.has_helmet,
             has_glasses=rec.has_glasses,
             has_mask=rec.has_mask,
+            has_vest=rec.has_vest,
             is_compliant=rec.is_compliant,
             confidence=rec.confidence,
             has_evidence=bool(rec.evidence_path and Path(rec.evidence_path).exists()),
@@ -199,12 +285,14 @@ def export_records_csv(
             "Fecha_UTC",
             "Empleado",
             "Puesto",
-            "Correo",
+            "Area",
+            "Movimiento",
+            "Metodo_ID",
             "Estado_EPP",
-            "Origen",
             "Casco",
             "Lentes",
             "Mascarilla",
+            "Chaleco",
             "Confianza_Pct",
         ]
     )
@@ -216,12 +304,14 @@ def export_records_csv(
                 rec.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                 user.full_name,
                 user.job_title,
-                user.email,
+                rec.zone_name,
+                "Entrada" if rec.event_type == "ENTRY" else "Salida",
+                "Biometrico Facial" if rec.recognition_method == "face_biometric" else "Sesion",
                 "Aprobado" if rec.is_compliant else "Rechazado",
-                "En vivo" if rec.is_live_person else "Prueba",
                 "Si" if rec.has_helmet else "No",
                 "Si" if rec.has_glasses else "No",
                 "Si" if rec.has_mask else "No",
+                "Si" if rec.has_vest else "No",
                 round(rec.confidence * 100, 1),
             ]
         )
@@ -254,7 +344,21 @@ def list_users(
     admin_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    return list(db.scalars(select(User).order_by(User.id.asc())).all())
+    users = db.scalars(select(User).order_by(User.id.asc())).all()
+    return [
+        AdminUserOut(
+            id=u.id,
+            full_name=u.full_name,
+            email=u.email,
+            role=u.role,
+            job_title=u.job_title,
+            employee_code=u.employee_code,
+            has_face_enrolled=isinstance(u.face_descriptor, list) and len(u.face_descriptor) == 128,
+            is_active=u.is_active,
+            created_at=u.created_at,
+        )
+        for u in users
+    ]
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserOut)
@@ -277,6 +381,9 @@ def update_user(
     if payload.job_title is not None:
         target.job_title = payload.job_title.strip()
 
+    if payload.employee_code is not None:
+        target.employee_code = payload.employee_code.strip().upper() or None
+
     if payload.role is not None:
         if payload.role not in {"employee", "admin"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rol inválido.")
@@ -292,4 +399,14 @@ def update_user(
 
     db.commit()
     db.refresh(target)
-    return target
+    return AdminUserOut(
+        id=target.id,
+        full_name=target.full_name,
+        email=target.email,
+        role=target.role,
+        job_title=target.job_title,
+        employee_code=target.employee_code,
+        has_face_enrolled=isinstance(target.face_descriptor, list) and len(target.face_descriptor) == 128,
+        is_active=target.is_active,
+        created_at=target.created_at,
+    )

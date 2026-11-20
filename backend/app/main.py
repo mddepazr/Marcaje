@@ -12,11 +12,45 @@ from app.db.session import SessionLocal, engine
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    # Migración segura de columna job_title sin perder datos existentes
     with engine.begin() as conn:
         conn.execute(
             text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(100) NOT NULL DEFAULT 'Operador General'"
+            )
+        )
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(40)")
+        )
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS face_descriptor JSON")
+        )
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS face_enrolled_at TIMESTAMPTZ")
+        )
+        conn.execute(
+            text("ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS zone_id INTEGER")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS zone_name VARCHAR(100) NOT NULL DEFAULT 'Planta General'"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS event_type VARCHAR(20) NOT NULL DEFAULT 'ENTRY'"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS recognition_method VARCHAR(30) NOT NULL DEFAULT 'session'"
+            )
+        )
+        conn.execute(
+            text("ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS face_similarity FLOAT")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS has_vest BOOLEAN NOT NULL DEFAULT FALSE"
             )
         )
         conn.execute(
@@ -26,12 +60,13 @@ async def lifespan(app: FastAPI):
         )
     with SessionLocal() as db:
         admin.ensure_default_roles(db)
+        marcaje.ensure_default_zones(db)
     yield
 
 
 app = FastAPI(
     title="API Marcaje EPP",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 

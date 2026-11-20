@@ -11,6 +11,8 @@ CLASSES = [
     "glasses",
     "face mask",
     "surgical mask",
+    "safety vest",
+    "vest",
     "cell phone",
     "laptop",
     "monitor",

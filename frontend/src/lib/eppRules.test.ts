@@ -6,6 +6,7 @@ describe("Reglas de cumplimiento EPP y permisos - Marcaje", () => {
     require_helmet: true,
     require_glasses: true,
     require_mask: true,
+    require_vest: true,
   };
 
   it("aprueba el marcaje cuando hay persona real y cumple todo el EPP obligatorio", () => {
@@ -15,6 +16,7 @@ describe("Reglas de cumplimiento EPP y permisos - Marcaje", () => {
       has_helmet: true,
       has_glasses: true,
       has_mask: true,
+      has_vest: true,
     };
 
     expect(getMissingPPE(scan, fullZoneRules)).toEqual([]);
@@ -28,6 +30,7 @@ describe("Reglas de cumplimiento EPP y permisos - Marcaje", () => {
       has_helmet: true,
       has_glasses: true,
       has_mask: false,
+      has_vest: true,
     };
 
     expect(getMissingPPE(scan, fullZoneRules)).toEqual(["Mascarilla"]);
@@ -41,6 +44,7 @@ describe("Reglas de cumplimiento EPP y permisos - Marcaje", () => {
       has_helmet: true,
       has_glasses: true,
       has_mask: true,
+      has_vest: true,
     };
 
     expect(evaluateCompliance(spoofScan, fullZoneRules)).toBe(false);
