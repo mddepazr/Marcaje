@@ -16,7 +16,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
-import { Grid } from "@astryxdesign/core/Grid";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -24,7 +23,6 @@ import { Switch } from "@astryxdesign/core/Switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { TopNav, TopNavHeading } from "@astryxdesign/core/TopNav";
 import { VStack } from "@astryxdesign/core/VStack";
 import {
   AdminAttendanceRecord,
@@ -37,6 +35,7 @@ import {
 } from "../lib/api";
 import { Toast, ToastData } from "../components/ui/Toast";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
+import { ThemeSwitcher } from "../components/ui/ThemeSwitcher";
 
 interface Props {
   user: User;
@@ -58,7 +57,6 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
   const [evidenceRecordId, setEvidenceRecordId] = useState<number | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
 
-  // Modal nueva área / zona
   const [newZoneModalOpen, setNewZoneModalOpen] = useState(false);
   const [zoneName, setZoneName] = useState("");
   const [zoneDesc, setZoneDesc] = useState("");
@@ -68,13 +66,11 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
   const [zoneVest, setZoneVest] = useState(true);
   const [creatingZone, setCreatingZone] = useState(false);
 
-  // Modal crear nuevo puesto
   const [newRoleModalOpen, setNewRoleModalOpen] = useState(false);
   const [newRoleName, setNewRoleName] = useState("");
   const [newRoleAccess, setNewRoleAccess] = useState<"employee" | "admin">("employee");
   const [creatingRole, setCreatingRole] = useState(false);
 
-  // Modales de confirmación
   const [pendingRoleChange, setPendingRoleChange] = useState<{
     target: AdminUserItem;
     selectedRole: JobRole;
@@ -258,132 +254,141 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
 
   return (
     <div style={{ backgroundColor: "var(--color-background-body)" }} className="min-h-screen">
-      <div
+      <header
         style={{
           backgroundColor: "var(--color-background-surface)",
           borderColor: "var(--color-border-subtle)",
         }}
         className="border-b"
       >
-        <div className="mx-auto max-w-7xl px-4">
-          <TopNav
-            label="Navegación de Panel Administrativo"
-            heading={
-              <HStack gap={2} vAlign="center">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3.5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center justify-between gap-3">
+            <HStack gap={3} vAlign="center">
+              <div
+                style={{
+                  backgroundColor: "var(--color-background-muted)",
+                  borderColor: "var(--color-border-subtle)",
+                }}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border"
+              >
                 <ShieldCheck className="h-5 w-5" />
-                <TopNavHeading>Panel de Control Biométrico y EPP</TopNavHeading>
-              </HStack>
-            }
-            startContent={
-              <HStack gap={2} vAlign="center">
-                <Badge variant="neutral" label={user.job_title || "Administrador"} />
+              </div>
+              <VStack gap={0.5}>
+                <Heading level={3}>Panel de Control EPP</Heading>
                 <Text type="supporting">Supervisor: {user.full_name}</Text>
-              </HStack>
-            }
-            endContent={
-              <HStack gap={2} vAlign="center">
-                <Button
-                  label="Abrir Quiosco de Marcaje"
-                  variant="primary"
-                  size="sm"
-                  icon={<Camera className="h-3.5 w-3.5" />}
-                  onClick={onSwitchToScanner}
-                />
-                <Button
-                  label="Cerrar sesión"
-                  variant="secondary"
-                  size="sm"
-                  icon={<LogOut className="h-3.5 w-3.5" />}
-                  onClick={onLogout}
-                />
-              </HStack>
-            }
-          />
-        </div>
-      </div>
+              </VStack>
+            </HStack>
 
-      <div className="mx-auto max-w-7xl px-4 py-6">
+            <Badge label={user.job_title || "Administrador"} variant="neutral" />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2.5 lg:justify-end">
+            <ThemeSwitcher />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                label="Quiosco de Marcaje"
+                variant="primary"
+                size="sm"
+                icon={<Camera className="h-3.5 w-3.5" />}
+                onClick={onSwitchToScanner}
+              />
+              <Button
+                label="Cerrar sesión"
+                variant="secondary"
+                size="sm"
+                icon={<LogOut className="h-3.5 w-3.5" />}
+                onClick={onLogout}
+              />
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         <VStack gap={6}>
-          {/* Métricas globales */}
           {stats && (
-            <Grid columns={{ minWidth: 220, repeat: "fit" }} gap={4}>
-              <Card padding={5}>
-                <VStack gap={1.5}>
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+              <Card padding={4}>
+                <VStack gap={1}>
                   <Text type="supporting">Total Marcajes</Text>
                   <Heading level={2}>
-                    <Text type="inherit" hasTabularNumbers>
+                    <Text hasTabularNumbers type="inherit">
                       {stats.total_scans}
                     </Text>
                   </Heading>
-                  <Text type="supporting">{stats.live_scans} con prueba de vida</Text>
-                </VStack>
-              </Card>
-
-              <Card padding={5}>
-                <VStack gap={1.5}>
-                  <Text type="supporting">Cumplimiento EPP</Text>
-                  <Heading level={2}>
-                    <Text type="inherit" hasTabularNumbers>
-                      {stats.compliance_rate}%
-                    </Text>
-                  </Heading>
-                  <Text type="supporting">Tasa global de ingresos válidos</Text>
-                </VStack>
-              </Card>
-
-              <Card padding={5}>
-                <VStack gap={1.5}>
-                  <Text type="supporting">Aprobados</Text>
-                  <Heading level={2}>
-                    <Text type="inherit" hasTabularNumbers>
-                      {stats.compliant_scans}
-                    </Text>
-                  </Heading>
-                  <Text type="supporting">Cumplen normativa del área</Text>
-                </VStack>
-              </Card>
-
-              <Card padding={5}>
-                <VStack gap={1.5}>
-                  <Text type="supporting">Rechazados</Text>
-                  <Heading level={2}>
-                    <Text type="inherit" hasTabularNumbers>
-                      {stats.non_compliant_scans}
-                    </Text>
-                  </Heading>
-                  <Text type="supporting">
-                    {users.filter((u) => u.has_face_enrolled).length} de {stats.total_users} rostros
-                    registrados
+                  <Text maxLines={1} type="supporting">
+                    {stats.live_scans} en vivo
                   </Text>
                 </VStack>
               </Card>
-            </Grid>
+
+              <Card padding={4}>
+                <VStack gap={1}>
+                  <Text type="supporting">Cumplimiento</Text>
+                  <Heading level={2}>
+                    <Text hasTabularNumbers type="inherit">
+                      {stats.compliance_rate}%
+                    </Text>
+                  </Heading>
+                  <Text maxLines={1} type="supporting">
+                    Tasa global válida
+                  </Text>
+                </VStack>
+              </Card>
+
+              <Card padding={4}>
+                <VStack gap={1}>
+                  <Text type="supporting">Aprobados</Text>
+                  <Heading level={2}>
+                    <Text hasTabularNumbers type="inherit">
+                      {stats.compliant_scans}
+                    </Text>
+                  </Heading>
+                  <Text maxLines={1} type="supporting">
+                    Cumplen normativa
+                  </Text>
+                </VStack>
+              </Card>
+
+              <Card padding={4}>
+                <VStack gap={1}>
+                  <Text type="supporting">Rechazados</Text>
+                  <Heading level={2}>
+                    <Text hasTabularNumbers type="inherit">
+                      {stats.non_compliant_scans}
+                    </Text>
+                  </Heading>
+                  <Text maxLines={1} type="supporting">
+                    {users.filter((u) => u.has_face_enrolled).length}/{stats.total_users} rostros
+                  </Text>
+                </VStack>
+              </Card>
+            </div>
           )}
 
-          {/* Navegación por Pestañas Astryx */}
           <TabList
             value={activeTab}
             onChange={(val) => setActiveTab(val as "records" | "zones" | "users")}
             hasDivider
           >
-            <Tab value="records" label="Registro de Asistencia" />
-            <Tab value="zones" label="Áreas y Normativa EPP" />
-            <Tab value="users" label="Colaboradores y Puestos" />
+            <Tab label="Asistencia" value="records" />
+            <Tab label="Áreas y EPP" value="zones" />
+            <Tab label="Personal" value="users" />
           </TabList>
 
-          {/* TAB 1: Registro Global de Asistencia */}
           {activeTab === "records" && (
             <Card padding={5}>
-              <VStack gap={4}>
-                <div className="flex flex-wrap items-end justify-between gap-3">
+              <VStack gap={5}>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <VStack gap={0.5}>
-                    <Heading level={3}>Registro Global de Asistencia y Cumplimiento EPP</Heading>
+                    <Heading level={3}>Registro Global de Asistencia</Heading>
                     <Text type="supporting">
                       Historial auditado con evidencia fotográfica y similitud biométrica
                     </Text>
                   </VStack>
 
-                  <HStack gap={2} wrap="wrap" vAlign="end">
+                  <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
                     <TextInput
                       label="Buscar"
                       isLabelHidden
@@ -394,168 +399,233 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                       placeholder="Buscar empleado o área..."
                       value={search}
                       onChange={(val) => handleFilterChange(statusFilter, val)}
-                      width={230}
+                      width="100%"
                     />
 
-                    <Selector
-                      label="Estado"
-                      isLabelHidden
-                      size="sm"
-                      width={180}
-                      options={[
-                        { value: "all", label: "Todos los estados" },
-                        { value: "approved", label: "Solo Aprobados" },
-                        { value: "rejected", label: "Solo Rechazados" },
-                      ]}
-                      value={statusFilter}
-                      onChange={(val) => handleFilterChange(val, search)}
-                    />
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-[165px] flex-1">
+                        <Selector
+                          isLabelHidden
+                          label="Estado"
+                          size="sm"
+                          value={statusFilter}
+                          width="100%"
+                          options={[
+                            { value: "all", label: "Todos los estados" },
+                            { value: "approved", label: "Solo Aprobados" },
+                            { value: "rejected", label: "Solo Rechazados" },
+                          ]}
+                          onChange={(val) => handleFilterChange(val, search)}
+                        />
+                      </div>
 
-                    <Button
-                      label="Exportar CSV"
-                      variant="secondary"
-                      size="sm"
-                      icon={<Download className="h-3.5 w-3.5" />}
-                      href={api.exportCsvUrl}
-                      onClick={() =>
-                        setToast({
-                          type: "success",
-                          title: "Exportando reporte",
-                          message: "Se inició la descarga del archivo CSV.",
-                        })
-                      }
-                    />
-                  </HStack>
+                      <Button
+                        label="CSV"
+                        variant="secondary"
+                        size="sm"
+                        icon={<Download className="h-3.5 w-3.5" />}
+                        href={api.exportCsvUrl}
+                        onClick={() =>
+                          setToast({
+                            type: "success",
+                            title: "Exportando reporte",
+                            message: "Se inició la descarga del archivo CSV.",
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr
-                        style={{ borderColor: "var(--color-border-subtle)" }}
-                        className="border-b uppercase"
-                      >
-                        <th className="py-3 pr-3">
-                          <Text type="supporting">Fecha y Hora</Text>
-                        </th>
-                        <th className="py-3 px-3">
-                          <Text type="supporting">Colaborador</Text>
-                        </th>
-                        <th className="py-3 px-3">
-                          <Text type="supporting">Área</Text>
-                        </th>
-                        <th className="py-3 px-3">
-                          <Text type="supporting">Tipo</Text>
-                        </th>
-                        <th className="py-3 px-3">
-                          <Text type="supporting">Estado</Text>
-                        </th>
-                        <th className="py-3 px-2 text-center">
-                          <Text type="supporting">Casco</Text>
-                        </th>
-                        <th className="py-3 px-2 text-center">
-                          <Text type="supporting">Lentes</Text>
-                        </th>
-                        <th className="py-3 px-2 text-center">
-                          <Text type="supporting">Masc.</Text>
-                        </th>
-                        <th className="py-3 px-2 text-center">
-                          <Text type="supporting">Chaleco</Text>
-                        </th>
-                        <th className="py-3 pl-3 text-right">
-                          <Text type="supporting">Foto</Text>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody
-                      style={{ borderColor: "var(--color-border-subtle)" }}
-                      className="divide-y"
-                    >
-                      {records.length === 0 ? (
-                        <tr>
-                          <td colSpan={10} className="py-8 text-center">
-                            <Text type="supporting">
-                              No hay registros que coincidan con el filtro.
-                            </Text>
-                          </td>
-                        </tr>
-                      ) : (
-                        records.map((rec) => (
-                          <tr key={rec.id}>
-                            <td className="whitespace-nowrap py-3 pr-3">
-                              <Text type="supporting" hasTabularNumbers>
+                {records.length === 0 ? (
+                  <div className="py-8 text-center">
+                    <Text type="supporting">No hay registros que coincidan con el filtro.</Text>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-3 md:hidden">
+                      {records.map((rec) => (
+                        <div
+                          key={rec.id}
+                          style={{
+                            backgroundColor: "var(--color-background-muted)",
+                            borderColor: "var(--color-border-subtle)",
+                          }}
+                          className="rounded-xl border p-4"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <VStack gap={0.5}>
+                              <Text type="label">{rec.user_full_name}</Text>
+                              <Text type="supporting">
+                                {rec.zone_name} ·{" "}
+                                {rec.recognition_method === "face_biometric"
+                                  ? `Biométrico (${Math.round((rec.face_similarity || 0.85) * 100)}%)`
+                                  : "Sesión"}
+                              </Text>
+                              <Text hasTabularNumbers type="supporting">
                                 {new Date(rec.created_at).toLocaleString()}
                               </Text>
-                            </td>
-                            <td className="py-3 px-3">
-                              <VStack gap={0}>
-                                <Text type="label">{rec.user_full_name}</Text>
-                                <Text type="supporting">
-                                  {rec.recognition_method === "face_biometric"
-                                    ? `Biométrico (${Math.round((rec.face_similarity || 0.85) * 100)}%)`
-                                    : "Sesión"}
-                                </Text>
-                              </VStack>
-                            </td>
-                            <td className="py-3 px-3">
-                              <Text type="supporting">{rec.zone_name}</Text>
-                            </td>
-                            <td className="py-3 px-3">
+                            </VStack>
+                            <Badge
+                              variant={rec.is_compliant ? "success" : "error"}
+                              label={rec.is_compliant ? "Aprobado" : "Rechazado"}
+                            />
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <Badge
                                 variant={rec.event_type === "EXIT" ? "orange" : "blue"}
                                 label={rec.event_type === "EXIT" ? "Salida" : "Entrada"}
                               />
-                            </td>
-                            <td className="py-3 px-3">
                               <Badge
-                                variant={rec.is_compliant ? "success" : "error"}
-                                label={rec.is_compliant ? "Aprobado" : "Rechazado"}
+                                variant="neutral"
+                                label={`EPP: ${
+                                  [
+                                    rec.has_helmet ? "Casco" : null,
+                                    rec.has_glasses ? "Lentes" : null,
+                                    rec.has_mask ? "Masc." : null,
+                                    rec.has_vest ? "Chaleco" : null,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(", ") || "Ninguno"
+                                }`}
                               />
-                            </td>
-                            <td className="py-3 px-2 text-center">
-                              <Text type="supporting">{rec.has_helmet ? "Sí" : "No"}</Text>
-                            </td>
-                            <td className="py-3 px-2 text-center">
-                              <Text type="supporting">{rec.has_glasses ? "Sí" : "No"}</Text>
-                            </td>
-                            <td className="py-3 px-2 text-center">
-                              <Text type="supporting">{rec.has_mask ? "Sí" : "No"}</Text>
-                            </td>
-                            <td className="py-3 px-2 text-center">
-                              <Text type="supporting">{rec.has_vest ? "Sí" : "No"}</Text>
-                            </td>
-                            <td className="py-3 pl-3 text-right">
-                              {rec.has_evidence ? (
-                                <Button
-                                  label="Ver"
-                                  variant="secondary"
-                                  size="sm"
-                                  icon={<Eye className="h-3.5 w-3.5" />}
-                                  onClick={() => setEvidenceRecordId(rec.id)}
-                                />
-                              ) : (
-                                <Text type="supporting">—</Text>
-                              )}
-                            </td>
+                            </div>
+
+                            {rec.has_evidence && (
+                              <Button
+                                label="Foto"
+                                variant="secondary"
+                                size="sm"
+                                icon={<Eye className="h-3.5 w-3.5" />}
+                                onClick={() => setEvidenceRecordId(rec.id)}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="hidden overflow-x-auto md:block">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr
+                            style={{ borderColor: "var(--color-border-subtle)" }}
+                            className="border-b uppercase"
+                          >
+                            <th className="py-3 pr-3">
+                              <Text type="supporting">Fecha y Hora</Text>
+                            </th>
+                            <th className="py-3 px-3">
+                              <Text type="supporting">Colaborador</Text>
+                            </th>
+                            <th className="py-3 px-3">
+                              <Text type="supporting">Área</Text>
+                            </th>
+                            <th className="py-3 px-3">
+                              <Text type="supporting">Tipo</Text>
+                            </th>
+                            <th className="py-3 px-3">
+                              <Text type="supporting">Estado</Text>
+                            </th>
+                            <th className="py-3 px-2 text-center">
+                              <Text type="supporting">Casco</Text>
+                            </th>
+                            <th className="py-3 px-2 text-center">
+                              <Text type="supporting">Lentes</Text>
+                            </th>
+                            <th className="py-3 px-2 text-center">
+                              <Text type="supporting">Masc.</Text>
+                            </th>
+                            <th className="py-3 px-2 text-center">
+                              <Text type="supporting">Chaleco</Text>
+                            </th>
+                            <th className="py-3 pl-3 text-right">
+                              <Text type="supporting">Foto</Text>
+                            </th>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                        </thead>
+                        <tbody
+                          style={{ borderColor: "var(--color-border-subtle)" }}
+                          className="divide-y"
+                        >
+                          {records.map((rec) => (
+                            <tr key={rec.id}>
+                              <td className="whitespace-nowrap py-3 pr-3">
+                                <Text hasTabularNumbers type="supporting">
+                                  {new Date(rec.created_at).toLocaleString()}
+                                </Text>
+                              </td>
+                              <td className="py-3 px-3">
+                                <VStack gap={0}>
+                                  <Text type="label">{rec.user_full_name}</Text>
+                                  <Text type="supporting">
+                                    {rec.recognition_method === "face_biometric"
+                                      ? `Biométrico (${Math.round((rec.face_similarity || 0.85) * 100)}%)`
+                                      : "Sesión"}
+                                  </Text>
+                                </VStack>
+                              </td>
+                              <td className="py-3 px-3">
+                                <Text type="supporting">{rec.zone_name}</Text>
+                              </td>
+                              <td className="py-3 px-3">
+                                <Badge
+                                  variant={rec.event_type === "EXIT" ? "orange" : "blue"}
+                                  label={rec.event_type === "EXIT" ? "Salida" : "Entrada"}
+                                />
+                              </td>
+                              <td className="py-3 px-3">
+                                <Badge
+                                  variant={rec.is_compliant ? "success" : "error"}
+                                  label={rec.is_compliant ? "Aprobado" : "Rechazado"}
+                                />
+                              </td>
+                              <td className="py-3 px-2 text-center">
+                                <Text type="supporting">{rec.has_helmet ? "Sí" : "No"}</Text>
+                              </td>
+                              <td className="py-3 px-2 text-center">
+                                <Text type="supporting">{rec.has_glasses ? "Sí" : "No"}</Text>
+                              </td>
+                              <td className="py-3 px-2 text-center">
+                                <Text type="supporting">{rec.has_mask ? "Sí" : "No"}</Text>
+                              </td>
+                              <td className="py-3 px-2 text-center">
+                                <Text type="supporting">{rec.has_vest ? "Sí" : "No"}</Text>
+                              </td>
+                              <td className="py-3 pl-3 text-right">
+                                {rec.has_evidence ? (
+                                  <Button
+                                    label="Ver"
+                                    variant="secondary"
+                                    size="sm"
+                                    icon={<Eye className="h-3.5 w-3.5" />}
+                                    onClick={() => setEvidenceRecordId(rec.id)}
+                                  />
+                                ) : (
+                                  <Text type="supporting">—</Text>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
               </VStack>
             </Card>
           )}
 
-          {/* TAB 2: Áreas Operativas y EPP */}
           {activeTab === "zones" && (
             <Card padding={5}>
-              <VStack gap={4}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <VStack gap={5}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <HStack gap={2} vAlign="center">
-                    <MapPin className="h-5 w-5" />
+                    <MapPin className="h-5 w-5 shrink-0" />
                     <VStack gap={0.5}>
-                      <Heading level={3}>Áreas Operativas y Normativa de EPP</Heading>
+                      <Heading level={3}>Áreas Operativas y Normativa EPP</Heading>
                       <Text type="supporting">
                         Si un área exige mascarilla o lentes, el quiosco activa validación en 2
                         fases anti-suplantación.
@@ -564,7 +634,7 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                   </HStack>
 
                   <Button
-                    label="Nueva Área / Zona"
+                    label="Nueva Área"
                     variant="primary"
                     size="sm"
                     icon={<Plus className="h-4 w-4" />}
@@ -572,7 +642,70 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                   />
                 </div>
 
-                <div className="overflow-x-auto">
+                <div className="flex flex-col gap-3 md:hidden">
+                  {zones.map((z) => {
+                    const twoPhase = z.require_mask || z.require_glasses;
+                    return (
+                      <div
+                        key={z.id}
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="rounded-xl border p-4"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <VStack gap={0.5}>
+                            <Text type="label">{z.name}</Text>
+                            {z.description && <Text type="supporting">{z.description}</Text>}
+                          </VStack>
+                          <Button
+                            label={z.is_active ? "Activa" : "Inactiva"}
+                            variant={z.is_active ? "secondary" : "ghost"}
+                            size="sm"
+                            onClick={() => handleToggleZoneRule(z, "is_active")}
+                          />
+                        </div>
+
+                        <div className="mt-3">
+                          <Badge
+                            variant={twoPhase ? "yellow" : "green"}
+                            label={twoPhase ? "2 Fases (Rostro → EPP)" : "1 Paso Simultáneo"}
+                          />
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                          <Switch
+                            label="Casco"
+                            size="sm"
+                            value={z.require_helmet}
+                            onChange={() => handleToggleZoneRule(z, "require_helmet")}
+                          />
+                          <Switch
+                            label="Lentes"
+                            size="sm"
+                            value={z.require_glasses}
+                            onChange={() => handleToggleZoneRule(z, "require_glasses")}
+                          />
+                          <Switch
+                            label="Mascarilla"
+                            size="sm"
+                            value={z.require_mask}
+                            onChange={() => handleToggleZoneRule(z, "require_mask")}
+                          />
+                          <Switch
+                            label="Chaleco"
+                            size="sm"
+                            value={z.require_vest}
+                            onChange={() => handleToggleZoneRule(z, "require_vest")}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="hidden overflow-x-auto md:block">
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr
@@ -619,8 +752,8 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                             <td className="py-3.5 px-3">
                               <div className="flex justify-center">
                                 <Switch
-                                  label={`Exigir casco en ${z.name}`}
                                   isLabelHidden
+                                  label={`Exigir casco en ${z.name}`}
                                   size="sm"
                                   value={z.require_helmet}
                                   onChange={() => handleToggleZoneRule(z, "require_helmet")}
@@ -630,8 +763,8 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                             <td className="py-3.5 px-3">
                               <div className="flex justify-center">
                                 <Switch
-                                  label={`Exigir lentes en ${z.name}`}
                                   isLabelHidden
+                                  label={`Exigir lentes en ${z.name}`}
                                   size="sm"
                                   value={z.require_glasses}
                                   onChange={() => handleToggleZoneRule(z, "require_glasses")}
@@ -641,8 +774,8 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                             <td className="py-3.5 px-3">
                               <div className="flex justify-center">
                                 <Switch
-                                  label={`Exigir mascarilla en ${z.name}`}
                                   isLabelHidden
+                                  label={`Exigir mascarilla en ${z.name}`}
                                   size="sm"
                                   value={z.require_mask}
                                   onChange={() => handleToggleZoneRule(z, "require_mask")}
@@ -652,8 +785,8 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                             <td className="py-3.5 px-3">
                               <div className="flex justify-center">
                                 <Switch
-                                  label={`Exigir chaleco en ${z.name}`}
                                   isLabelHidden
+                                  label={`Exigir chaleco en ${z.name}`}
                                   size="sm"
                                   value={z.require_vest}
                                   onChange={() => handleToggleZoneRule(z, "require_vest")}
@@ -684,15 +817,14 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
             </Card>
           )}
 
-          {/* TAB 3: Colaboradores y Puestos */}
           {activeTab === "users" && (
             <Card padding={5}>
-              <VStack gap={4}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <VStack gap={5}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <HStack gap={2} vAlign="center">
-                    <Users className="h-5 w-5" />
+                    <Users className="h-5 w-5 shrink-0" />
                     <VStack gap={0.5}>
-                      <Heading level={3}>Colaboradores, Puestos y Estado Biométrico</Heading>
+                      <Heading level={3}>Colaboradores, Puestos y Biometría</Heading>
                       <Text type="supporting">
                         Administra roles operativos, accesos administrativos y registro facial
                       </Text>
@@ -700,7 +832,7 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                   </HStack>
 
                   <Button
-                    label="Crear nuevo puesto / rol"
+                    label="Nuevo puesto"
                     variant="primary"
                     size="sm"
                     icon={<Plus className="h-4 w-4" />}
@@ -708,7 +840,81 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                   />
                 </div>
 
-                <div className="overflow-x-auto">
+                <div className="flex flex-col gap-3 md:hidden">
+                  {users.map((u) => {
+                    const hasCustomValue = !jobRoles.some((r) => r.name === u.job_title);
+                    const roleOptions = [
+                      ...(hasCustomValue ? [{ value: u.job_title, label: u.job_title }] : []),
+                      ...jobRoles.map((r) => ({ value: r.name, label: r.name })),
+                    ];
+
+                    return (
+                      <div
+                        key={u.id}
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="rounded-xl border p-4"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <VStack gap={0.5}>
+                            <Text type="label">{u.full_name}</Text>
+                            <Text type="supporting">{u.email}</Text>
+                          </VStack>
+                          <Badge
+                            variant={u.is_active ? "success" : "error"}
+                            label={u.is_active ? "Activo" : "Inactivo"}
+                          />
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          {u.has_face_enrolled ? (
+                            <Badge
+                              variant="green"
+                              icon={<CheckCircle2 className="h-3 w-3" />}
+                              label="Rostro registrado"
+                            />
+                          ) : (
+                            <Badge label="Rostro pendiente" variant="neutral" />
+                          )}
+                          {u.employee_code && (
+                            <Badge label={`ID: ${u.employee_code}`} variant="neutral" />
+                          )}
+                        </div>
+
+                        <div className="mt-3 flex flex-col gap-2.5 sm:flex-row sm:items-center">
+                          <div className="flex-1">
+                            <Selector
+                              disabledMessage="No puedes cambiar tu propio rol"
+                              isDisabled={u.id === user.id}
+                              label="Puesto / Rol"
+                              options={roleOptions}
+                              size="sm"
+                              value={u.job_title}
+                              width="100%"
+                              onChange={(val) => {
+                                const chosen = jobRoles.find((r) => r.name === val);
+                                if (chosen && chosen.name !== u.job_title) {
+                                  setPendingRoleChange({ target: u, selectedRole: chosen });
+                                }
+                              }}
+                            />
+                          </div>
+                          <Button
+                            isDisabled={u.id === user.id}
+                            label={u.is_active ? "Desactivar" : "Activar"}
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setPendingStatusToggle(u)}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="hidden overflow-x-auto md:block">
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr
@@ -765,19 +971,19 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                                   label="Registrado"
                                 />
                               ) : (
-                                <Badge variant="neutral" label="Pendiente" />
+                                <Badge label="Pendiente" variant="neutral" />
                               )}
                             </td>
                             <td className="py-3.5 px-3">
                               <Selector
-                                label={`Puesto de ${u.full_name}`}
-                                isLabelHidden
-                                size="sm"
-                                width={220}
-                                isDisabled={u.id === user.id}
                                 disabledMessage="No puedes cambiar tu propio rol"
+                                isDisabled={u.id === user.id}
+                                isLabelHidden
+                                label={`Puesto de ${u.full_name}`}
                                 options={roleOptions}
+                                size="sm"
                                 value={u.job_title}
+                                width={220}
                                 onChange={(val) => {
                                   const chosen = jobRoles.find((r) => r.name === val);
                                   if (chosen && chosen.name !== u.job_title) {
@@ -794,10 +1000,10 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                             </td>
                             <td className="py-3.5 pl-4 text-right">
                               <Button
-                                label={u.is_active ? "Desactivar" : "Activar"}
-                                variant="secondary"
-                                size="sm"
                                 isDisabled={u.id === user.id}
+                                label={u.is_active ? "Desactivar" : "Activar"}
+                                size="sm"
+                                variant="secondary"
                                 onClick={() => setPendingStatusToggle(u)}
                               />
                             </td>
@@ -811,9 +1017,8 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
             </Card>
           )}
         </VStack>
-      </div>
+      </main>
 
-      {/* Modal Crear Nueva Área */}
       <Dialog
         isOpen={newZoneModalOpen}
         onOpenChange={(isOpen) => {
@@ -825,25 +1030,25 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
         <form onSubmit={handleCreateZone}>
           <VStack gap={4}>
             <DialogHeader
-              title="Nueva Área / Zona de Trabajo"
-              subtitle="Define el nombre y el equipo de protección obligatorio"
               onOpenChange={(isOpen) => {
                 if (!isOpen && !creatingZone) setNewZoneModalOpen(false);
               }}
+              subtitle="Define el nombre y el equipo de protección obligatorio"
+              title="Nueva Área / Zona de Trabajo"
             />
 
             <TextInput
+              isRequired
               label="Nombre del área"
               placeholder="Ej. Destilación, Especias, Laboratorio..."
               value={zoneName}
               onChange={setZoneName}
-              isRequired
               width="100%"
             />
 
             <TextInput
-              label="Descripción breve"
               isOptional
+              label="Descripción breve"
               placeholder="Ej. Ingreso con equipo completo de protección"
               value={zoneDesc}
               onChange={setZoneDesc}
@@ -862,23 +1067,22 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
 
             <HStack gap={2} hAlign="end">
               <Button
+                isDisabled={creatingZone}
                 label="Cancelar"
                 variant="secondary"
-                isDisabled={creatingZone}
                 onClick={() => setNewZoneModalOpen(false)}
               />
               <Button
-                type="submit"
-                variant="primary"
                 isLoading={creatingZone}
                 label={creatingZone ? "Creando..." : "Guardar Área"}
+                type="submit"
+                variant="primary"
               />
             </HStack>
           </VStack>
         </form>
       </Dialog>
 
-      {/* Modal Crear Nuevo Puesto */}
       <Dialog
         isOpen={newRoleModalOpen}
         onOpenChange={(isOpen) => {
@@ -890,45 +1094,45 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
         <form onSubmit={handleCreateJobRole}>
           <VStack gap={4}>
             <DialogHeader
-              title="Agregar Nuevo Puesto a la Lista"
-              subtitle="Crea un cargo operativo o administrativo para asignar a colaboradores"
               onOpenChange={(isOpen) => {
                 if (!isOpen && !creatingRole) setNewRoleModalOpen(false);
               }}
+              subtitle="Crea un cargo operativo o administrativo para asignar a colaboradores"
+              title="Agregar Nuevo Puesto a la Lista"
             />
 
             <TextInput
+              isRequired
               label="Nombre del puesto o rol"
               placeholder="Ej. Operador de Destilación, Soldador..."
               value={newRoleName}
               onChange={setNewRoleName}
-              isRequired
               width="100%"
             />
 
             <Selector
               label="Nivel de acceso en el sistema"
+              value={newRoleAccess}
               width="100%"
               options={[
                 { value: "employee", label: "Operador (Solo terminal de marcaje)" },
-                { value: "admin", label: "Administrador (Panel de control + marcaje)" },
+                { value: "admin", label: "Administrador (Panel de control + terminal)" },
               ]}
-              value={newRoleAccess}
               onChange={(val) => setNewRoleAccess(val as "employee" | "admin")}
             />
 
             <HStack gap={2} hAlign="end">
               <Button
+                isDisabled={creatingRole}
                 label="Cancelar"
                 variant="secondary"
-                isDisabled={creatingRole}
                 onClick={() => setNewRoleModalOpen(false)}
               />
               <Button
-                type="submit"
-                variant="primary"
                 isLoading={creatingRole}
                 label={creatingRole ? "Agregando..." : "Guardar en lista"}
+                type="submit"
+                variant="primary"
               />
             </HStack>
           </VStack>
@@ -954,9 +1158,7 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
         title={pendingStatusToggle?.is_active ? "Confirmar desactivación" : "Confirmar activación"}
         message={
           pendingStatusToggle
-            ? `¿Deseas ${
-                pendingStatusToggle.is_active ? "suspender el acceso" : "habilitar el acceso"
-              } de ${pendingStatusToggle.full_name}?`
+            ? `¿Deseas ${pendingStatusToggle.is_active ? "suspender" : "habilitar"} el acceso de ${pendingStatusToggle.full_name}?`
             : ""
         }
         confirmLabel={pendingStatusToggle?.is_active ? "Sí, desactivar" : "Sí, activar"}

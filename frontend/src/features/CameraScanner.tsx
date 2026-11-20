@@ -34,7 +34,6 @@ import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/Segme
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { TopNav, TopNavHeading } from "@astryxdesign/core/TopNav";
 import { VStack } from "@astryxdesign/core/VStack";
 import {
   AdminUserItem,
@@ -53,6 +52,7 @@ import {
   sampleTorsoHeadSignature,
 } from "../lib/faceBiometrics";
 import { Toast, ToastData } from "../components/ui/Toast";
+import { ThemeSwitcher } from "../components/ui/ThemeSwitcher";
 
 interface Props {
   user: User;
@@ -167,7 +167,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
       setStatusPill(reason);
     } else {
       setPillTone("neutral");
-      setStatusPill("Ubica tu rostro dentro del marco");
+      setStatusPill("Ubica tu rostro descubierto dentro del marco");
     }
     setStage(modelsReady ? "SEARCHING_FACE" : "LOADING_MODELS");
   };
@@ -187,7 +187,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
       .then(() => {
         setModelsReady(true);
         setStage("SEARCHING_FACE");
-        setStatusPill("Ubica tu rostro dentro del marco");
+        setStatusPill("Ubica tu rostro descubierto dentro del marco");
         setPillTone("neutral");
       })
       .catch(() => {
@@ -223,7 +223,6 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
     }
   }, [enrollOpen, enrollMode]);
 
-  // Bucle biométrico + rastreo continuo anti-suplantación
   useEffect(() => {
     if (!cameraReady || !modelsReady || enrollOpen) return;
 
@@ -314,7 +313,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           blinkCountRef.current = 0;
           faceFramesCountRef.current = 0;
           setPillTone("neutral");
-          setStatusPill("Ubica tu rostro descubierto en el marco");
+          setStatusPill("Ubica tu rostro descubierto dentro del marco");
           setStage("SEARCHING_FACE");
           return;
         }
@@ -621,87 +620,92 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
   return (
     <div style={{ backgroundColor: "var(--color-background-body)" }} className="min-h-screen">
-      <div
+      <header
         style={{
           backgroundColor: "var(--color-background-surface)",
           borderColor: "var(--color-border-subtle)",
         }}
         className="border-b"
       >
-        <div className="mx-auto max-w-6xl px-4">
-          <TopNav
-            label="Navegación de Terminal Biométrica"
-            heading={
-              <HStack gap={2} vAlign="center">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3.5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center justify-between gap-3">
+            <HStack gap={3} vAlign="center">
+              <div
+                style={{
+                  backgroundColor: "var(--color-background-muted)",
+                  borderColor: "var(--color-border-subtle)",
+                }}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border"
+              >
                 <ScanFace className="h-5 w-5" />
-                <TopNavHeading>Terminal Biométrica EPP</TopNavHeading>
-              </HStack>
-            }
-            startContent={
-              <HStack gap={2} vAlign="center">
-                <Badge
-                  variant="neutral"
-                  icon={<Clock className="h-3 w-3" />}
-                  label={
-                    <Text type="code" hasTabularNumbers>
-                      {clockText}
-                    </Text>
-                  }
-                />
+              </div>
+              <VStack gap={0.5}>
+                <Heading level={3}>Terminal Biométrica EPP</Heading>
                 <Text type="supporting">
                   {user.full_name} · {biometricDir.length}{" "}
                   {biometricDir.length === 1 ? "rostro" : "rostros"}
                 </Text>
-              </HStack>
-            }
-            endContent={
-              <HStack gap={2} vAlign="center">
+              </VStack>
+            </HStack>
+
+            <Badge
+              variant="neutral"
+              icon={<Clock className="h-3 w-3" />}
+              label={
+                <Text hasTabularNumbers type="code">
+                  {clockText}
+                </Text>
+              }
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2.5 lg:justify-end">
+            <ThemeSwitcher />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                label="Enrolar Rostro"
+                variant="secondary"
+                size="sm"
+                icon={<UserPlus className="h-3.5 w-3.5" />}
+                onClick={() => {
+                  setEnrollMode("camera");
+                  setEnrollOpen(true);
+                }}
+              />
+              {user.role === "admin" && onSwitchToAdmin && (
                 <Button
-                  label="Enrolar Rostro"
+                  label="Panel Admin"
                   variant="secondary"
                   size="sm"
-                  icon={<UserPlus className="h-3.5 w-3.5" />}
-                  onClick={() => {
-                    setEnrollMode("camera");
-                    setEnrollOpen(true);
-                  }}
+                  icon={<LayoutDashboard className="h-3.5 w-3.5" />}
+                  onClick={onSwitchToAdmin}
                 />
-                {user.role === "admin" && onSwitchToAdmin && (
-                  <Button
-                    label="Panel Admin"
-                    variant="secondary"
-                    size="sm"
-                    icon={<LayoutDashboard className="h-3.5 w-3.5" />}
-                    onClick={onSwitchToAdmin}
-                  />
-                )}
-                <Button
-                  label="Salir"
-                  variant="ghost"
-                  size="sm"
-                  icon={<LogOut className="h-3.5 w-3.5" />}
-                  onClick={onLogout}
-                />
-              </HStack>
-            }
-          />
+              )}
+              <Button
+                label="Salir"
+                variant="ghost"
+                size="sm"
+                icon={<LogOut className="h-3.5 w-3.5" />}
+                onClick={onLogout}
+              />
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="mx-auto max-w-6xl px-4 py-6">
-        <div className="grid gap-6 lg:grid-cols-12">
-          {/* Columna Izquierda: Quiosco Interactivo */}
+      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+        <div className="grid gap-6 lg:grid-cols-12 lg:gap-8">
           <div className="lg:col-span-7">
             <Card padding={5}>
-              <VStack gap={4}>
-                {/* Selector de Área + Flujo */}
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div className="min-w-[220px] flex-1">
+              <VStack gap={5}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="flex-1">
                     <Selector
                       label="Área operativa"
-                      size="sm"
+                      size="md"
                       width="100%"
-                      startIcon={<MapPin className="h-3.5 w-3.5" />}
+                      startIcon={<MapPin className="h-4 w-4" />}
                       options={zoneOptions}
                       value={selectedZoneId !== null ? String(selectedZoneId) : undefined}
                       onChange={(val) => {
@@ -710,38 +714,68 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                       }}
                     />
                   </div>
-                  <Badge
-                    variant={requiresTwoPhase ? "yellow" : "green"}
-                    label={requiresTwoPhase ? "2 Fases (Rostro → EPP)" : "1 Paso Simultáneo"}
-                  />
+                  <div className="shrink-0">
+                    <Badge
+                      variant={requiresTwoPhase ? "yellow" : "green"}
+                      label={requiresTwoPhase ? "2 Fases (Rostro → EPP)" : "1 Paso Simultáneo"}
+                    />
+                  </div>
                 </div>
 
-                {/* EPP Exigido en el área */}
-                <HStack gap={2} vAlign="center" wrap="wrap">
-                  <Text type="supporting">EPP obligatorio:</Text>
-                  {requiredItems.length > 0 ? (
-                    requiredItems.map(({ label, icon: Icon }) => (
-                      <Badge
-                        key={label}
-                        variant="neutral"
-                        icon={<Icon className="h-3 w-3" />}
-                        label={label}
-                      />
-                    ))
-                  ) : (
-                    <Badge variant="green" label="Solo presencia" />
-                  )}
-                </HStack>
+                <VStack gap={2}>
+                  <Text type="supporting">EPP obligatorio en esta zona:</Text>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {requiredItems.length > 0 ? (
+                      requiredItems.map(({ label, icon: Icon }) => (
+                        <Badge
+                          key={label}
+                          variant="neutral"
+                          icon={<Icon className="h-3.5 w-3.5" />}
+                          label={label}
+                        />
+                      ))
+                    ) : (
+                      <Badge label="Solo presencia" variant="green" />
+                    )}
+                  </div>
+                </VStack>
 
-                {/* Visor de Cámara */}
+                <div
+                  style={{
+                    backgroundColor: "var(--color-background-muted)",
+                    borderColor: "var(--color-border-subtle)",
+                  }}
+                  className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                        pillTone === "green"
+                          ? "bg-emerald-500"
+                          : pillTone === "amber"
+                          ? "animate-pulse bg-amber-500"
+                          : pillTone === "red"
+                          ? "bg-rose-500"
+                          : "bg-neutral-400"
+                      }`}
+                    />
+                    <Text maxLines={2} type="label">
+                      {statusPill}
+                    </Text>
+                  </div>
+                  {stage === "PHASE2_EQUIPPING" && (
+                    <Badge label={`${equipCountdown}s`} variant="warning" />
+                  )}
+                </div>
+
                 <div
                   style={{ borderColor: "var(--color-border-subtle)" }}
-                  className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border bg-black"
+                  className="relative aspect-square w-full overflow-hidden rounded-2xl border bg-black sm:aspect-[4/3]"
                 >
                   {cameraError ? (
-                    <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-                      <Camera className="mb-2 h-8 w-8 opacity-50" />
-                      <Text type="supporting">{cameraError}</Text>
+                    <div className="flex h-full flex-col items-center justify-center p-6 text-center text-white">
+                      <Camera className="mb-3 h-9 w-9 opacity-60" />
+                      <p className="max-w-xs text-sm text-neutral-300">{cameraError}</p>
                     </div>
                   ) : (
                     <video
@@ -753,36 +787,9 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                     />
                   )}
 
-                  {/* Píldora superior de estado */}
-                  <div className="absolute inset-x-3 top-3.5 flex justify-center">
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
                     <div
-                      style={{
-                        backgroundColor: "rgba(18, 18, 18, 0.88)",
-                        borderColor: "var(--color-border-subtle)",
-                      }}
-                      className="inline-flex max-w-full items-center gap-2 rounded-full border px-3.5 py-1.5 shadow-md backdrop-blur-md"
-                    >
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${
-                          pillTone === "green"
-                            ? "bg-emerald-400"
-                            : pillTone === "amber"
-                            ? "animate-pulse bg-amber-400"
-                            : pillTone === "red"
-                            ? "bg-rose-400"
-                            : "bg-neutral-400"
-                        }`}
-                      />
-                      <Text type="label" maxLines={1}>
-                        {statusPill}
-                      </Text>
-                    </div>
-                  </div>
-
-                  {/* Marco biométrico central */}
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                    <div
-                      className={`relative h-52 w-44 rounded-[28px] transition-all duration-300 sm:h-60 sm:w-48 ${frameBorderStyles}`}
+                      className={`relative h-48 w-40 rounded-[28px] transition-all duration-300 sm:h-60 sm:w-48 ${frameBorderStyles}`}
                     >
                       <span className="absolute -left-0.5 -top-0.5 h-6 w-6 rounded-tl-[26px] border-l-[3px] border-t-[3px] border-white/90" />
                       <span className="absolute -right-0.5 -top-0.5 h-6 w-6 rounded-tr-[26px] border-r-[3px] border-t-[3px] border-white/90" />
@@ -791,31 +798,30 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                     </div>
                   </div>
 
-                  {/* Tarjeta flotante de empleado identificado */}
                   {identifiedProfile && (
                     <div
                       style={{
-                        backgroundColor: "rgba(18, 18, 18, 0.92)",
-                        borderColor: "var(--color-border-subtle)",
+                        backgroundColor: "rgba(18, 18, 18, 0.9)",
+                        borderColor: "rgba(255, 255, 255, 0.14)",
                       }}
-                      className="absolute inset-x-3 bottom-3.5 flex items-center justify-between rounded-xl border px-4 py-2.5 shadow-lg backdrop-blur-md"
+                      className="absolute inset-x-3 bottom-3 flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-white shadow-lg backdrop-blur-md"
                     >
-                      <HStack gap={2} vAlign="center">
+                      <div className="flex min-w-0 items-center gap-2.5">
                         <UserCheck className="h-4 w-4 shrink-0 text-emerald-400" />
-                        <VStack gap={0}>
-                          <Text type="label" maxLines={1}>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">
                             {identifiedProfile.full_name}
-                          </Text>
-                          <Text type="supporting" maxLines={1}>
+                          </p>
+                          <p className="truncate text-xs text-neutral-300">
                             {identifiedProfile.job_title}
                             {identifiedSimilarity
                               ? ` · ${(identifiedSimilarity * 100).toFixed(0)}% coincidencia`
                               : ""}
-                          </Text>
-                        </VStack>
-                      </HStack>
+                          </p>
+                        </div>
+                      </div>
                       {stage === "PHASE2_EQUIPPING" && (
-                        <Badge variant="warning" label={`${equipCountdown}s`} />
+                        <Badge label={`${equipCountdown}s`} variant="warning" />
                       )}
                     </div>
                   )}
@@ -824,8 +830,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                   <canvas ref={trackingCanvasRef} className="hidden" />
                 </div>
 
-                {/* Botones Principales Entrada / Salida */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Button
                     variant="primary"
                     size="lg"
@@ -849,8 +854,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
                 <Divider />
 
-                {/* Acciones Secundarias */}
-                <HStack gap={2} hAlign="between" vAlign="center">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <Button
                     label="Reiniciar lectura"
                     variant="ghost"
@@ -876,22 +880,17 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                       onClick={() => fileInputRef.current?.click()}
                     />
                   </div>
-                </HStack>
+                </div>
               </VStack>
             </Card>
 
             {scanError && (
               <div className="mt-4">
-                <Banner
-                  status="error"
-                  title="Marcaje no completado"
-                  description={scanError}
-                />
+                <Banner description={scanError} status="error" title="Marcaje no completado" />
               </div>
             )}
           </div>
 
-          {/* Columna Derecha: Resultado de Validación */}
           <div className="lg:col-span-5">
             <Card padding={5}>
               <VStack gap={4}>
@@ -899,24 +898,36 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                   <Heading level={3}>Resultado de Validación</Heading>
                   {lastResult && (
                     <Badge
-                      variant="neutral"
                       label={`IA ${(lastResult.confidence * 100).toFixed(0)}%`}
+                      variant="neutral"
                     />
                   )}
                 </HStack>
 
+                <Divider />
+
                 {!lastResult ? (
-                  <Card variant="muted" padding={5}>
-                    <VStack gap={2} hAlign="center">
-                      <ShieldCheck className="h-6 w-6 opacity-70" />
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div
+                      style={{
+                        backgroundColor: "var(--color-background-muted)",
+                        borderColor: "var(--color-border-subtle)",
+                      }}
+                      className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border"
+                    >
+                      <ShieldCheck className="h-6 w-6" />
+                    </div>
+                    <VStack gap={1.5} hAlign="center">
                       <Text type="label">Terminal lista para escaneo</Text>
-                      <Text type="supporting" justify="center">
-                        1. Mira a la cámara sin mascarilla para identificarte.
-                        <br />
-                        2. Colócate el EPP requerido y pulsa Registrar Entrada.
-                      </Text>
+                      <div className="text-center">
+                        <Text type="supporting">
+                          1. Mira a la cámara sin mascarilla para identificarte.
+                          <br />
+                          2. Colócate el EPP requerido y pulsa Registrar Entrada.
+                        </Text>
+                      </div>
                     </VStack>
-                  </Card>
+                  </div>
                 ) : (
                   <VStack gap={4}>
                     <Banner
@@ -940,8 +951,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                       }`}
                     />
 
-                    {/* Cuadrícula 2x3 de Verificaciones */}
-                    <div className="grid grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                       {[
                         {
                           label:
@@ -977,21 +987,26 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                           sub: "Chaleco",
                         },
                       ].map((cell) => (
-                        <Card key={cell.sub} variant="muted" padding={3}>
-                          <HStack gap={2} hAlign="between" vAlign="center">
-                            <VStack gap={0.5}>
-                              <Text type="supporting">{cell.sub}</Text>
-                              <Text type="label" maxLines={1}>
-                                {cell.label}
-                              </Text>
-                            </VStack>
-                            {cell.ok ? (
-                              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                            ) : (
-                              <XCircle className="h-4 w-4 shrink-0 text-rose-400" />
-                            )}
-                          </HStack>
-                        </Card>
+                        <div
+                          key={cell.sub}
+                          style={{
+                            backgroundColor: "var(--color-background-muted)",
+                            borderColor: "var(--color-border-subtle)",
+                          }}
+                          className="flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5"
+                        >
+                          <VStack gap={0.5}>
+                            <Text type="supporting">{cell.sub}</Text>
+                            <Text maxLines={1} type="label">
+                              {cell.label}
+                            </Text>
+                          </VStack>
+                          {cell.ok ? (
+                            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                          ) : (
+                            <XCircle className="h-4 w-4 shrink-0 text-rose-500" />
+                          )}
+                        </div>
                       ))}
                     </div>
                   </VStack>
@@ -1001,68 +1016,46 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           </div>
         </div>
 
-        {/* Bitácora Reciente */}
-        <div className="mt-6">
+        <section className="mt-8">
           <Card padding={5}>
             <VStack gap={4}>
-              <HStack gap={2} hAlign="between" vAlign="center">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <HStack gap={2} vAlign="center">
                   <History className="h-4 w-4" />
                   <Heading level={3}>Bitácora Reciente de Terminal</Heading>
                 </HStack>
-                <Text type="supporting">{history.length} registros</Text>
-              </HStack>
+                <Badge label={`${history.length} registros`} variant="neutral" />
+              </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr
-                      style={{ borderColor: "var(--color-border-subtle)" }}
-                      className="border-b uppercase"
-                    >
-                      <th className="py-2.5 pr-3">
-                        <Text type="supporting">Fecha / Hora</Text>
-                      </th>
-                      <th className="py-2.5 px-3">
-                        <Text type="supporting">Colaborador</Text>
-                      </th>
-                      <th className="py-2.5 px-3">
-                        <Text type="supporting">Área</Text>
-                      </th>
-                      <th className="py-2.5 px-3">
-                        <Text type="supporting">Tipo</Text>
-                      </th>
-                      <th className="py-2.5 px-3">
-                        <Text type="supporting">Resultado</Text>
-                      </th>
-                      <th className="py-2.5 pl-3 text-right">
-                        <Text type="supporting">EPP Detectado</Text>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody
-                    style={{ borderColor: "var(--color-border-subtle)" }}
-                    className="divide-y"
-                  >
-                    {history.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-6 text-center">
-                          <Text type="supporting">Aún no hay marcajes registrados.</Text>
-                        </td>
-                      </tr>
-                    ) : (
-                      history.map((item) => {
-                        const detectedTags = [
-                          item.has_helmet ? "Casco" : null,
-                          item.has_glasses ? "Lentes" : null,
-                          item.has_mask ? "Mascarilla" : null,
-                          item.has_vest ? "Chaleco" : null,
-                        ].filter(Boolean);
+              {history.length === 0 ? (
+                <div className="py-6 text-center">
+                  <Text type="supporting">Aún no hay marcajes registrados.</Text>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-3 md:hidden">
+                    {history.map((item) => {
+                      const detectedTags = [
+                        item.has_helmet ? "Casco" : null,
+                        item.has_glasses ? "Lentes" : null,
+                        item.has_mask ? "Mascarilla" : null,
+                        item.has_vest ? "Chaleco" : null,
+                      ].filter(Boolean);
 
-                        return (
-                          <tr key={item.id}>
-                            <td className="whitespace-nowrap py-3 pr-3">
-                              <Text type="supporting" hasTabularNumbers>
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            backgroundColor: "var(--color-background-muted)",
+                            borderColor: "var(--color-border-subtle)",
+                          }}
+                          className="rounded-xl border p-3.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <VStack gap={0.5}>
+                              <Text type="label">{item.user_full_name}</Text>
+                              <Text type="supporting">
+                                {item.zone_name} ·{" "}
                                 {new Date(item.created_at).toLocaleString([], {
                                   day: "2-digit",
                                   month: "2-digit",
@@ -1070,43 +1063,114 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                                   minute: "2-digit",
                                 })}
                               </Text>
-                            </td>
-                            <td className="py-3 px-3">
-                              <Text type="label">{item.user_full_name}</Text>
-                            </td>
-                            <td className="py-3 px-3">
-                              <Text type="supporting">{item.zone_name}</Text>
-                            </td>
-                            <td className="py-3 px-3">
-                              <Badge
-                                variant={item.event_type === "EXIT" ? "orange" : "blue"}
-                                label={item.event_type === "EXIT" ? "Salida" : "Entrada"}
-                              />
-                            </td>
-                            <td className="py-3 px-3">
-                              <Badge
-                                variant={item.is_compliant ? "success" : "error"}
-                                label={item.is_compliant ? "Aprobado" : "Rechazado"}
-                              />
-                            </td>
-                            <td className="py-3 pl-3 text-right">
-                              <Text type="supporting">
-                                {detectedTags.length > 0 ? detectedTags.join(" · ") : "Ninguno"}
-                              </Text>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                            </VStack>
+                            <Badge
+                              variant={item.is_compliant ? "success" : "error"}
+                              label={item.is_compliant ? "Aprobado" : "Rechazado"}
+                            />
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                            <Badge
+                              variant={item.event_type === "EXIT" ? "orange" : "blue"}
+                              label={item.event_type === "EXIT" ? "Salida" : "Entrada"}
+                            />
+                            <Text type="supporting">
+                              EPP: {detectedTags.length > 0 ? detectedTags.join(", ") : "Ninguno"}
+                            </Text>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr
+                          style={{ borderColor: "var(--color-border-subtle)" }}
+                          className="border-b uppercase"
+                        >
+                          <th className="py-2.5 pr-3">
+                            <Text type="supporting">Fecha / Hora</Text>
+                          </th>
+                          <th className="py-2.5 px-3">
+                            <Text type="supporting">Colaborador</Text>
+                          </th>
+                          <th className="py-2.5 px-3">
+                            <Text type="supporting">Área</Text>
+                          </th>
+                          <th className="py-2.5 px-3">
+                            <Text type="supporting">Tipo</Text>
+                          </th>
+                          <th className="py-2.5 px-3">
+                            <Text type="supporting">Resultado</Text>
+                          </th>
+                          <th className="py-2.5 pl-3 text-right">
+                            <Text type="supporting">EPP Detectado</Text>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody
+                        style={{ borderColor: "var(--color-border-subtle)" }}
+                        className="divide-y"
+                      >
+                        {history.map((item) => {
+                          const detectedTags = [
+                            item.has_helmet ? "Casco" : null,
+                            item.has_glasses ? "Lentes" : null,
+                            item.has_mask ? "Mascarilla" : null,
+                            item.has_vest ? "Chaleco" : null,
+                          ].filter(Boolean);
+
+                          return (
+                            <tr key={item.id}>
+                              <td className="whitespace-nowrap py-3 pr-3">
+                                <Text hasTabularNumbers type="supporting">
+                                  {new Date(item.created_at).toLocaleString([], {
+                                    day: "2-digit",
+                                    month: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </Text>
+                              </td>
+                              <td className="py-3 px-3">
+                                <Text type="label">{item.user_full_name}</Text>
+                              </td>
+                              <td className="py-3 px-3">
+                                <Text type="supporting">{item.zone_name}</Text>
+                              </td>
+                              <td className="py-3 px-3">
+                                <Badge
+                                  variant={item.event_type === "EXIT" ? "orange" : "blue"}
+                                  label={item.event_type === "EXIT" ? "Salida" : "Entrada"}
+                                />
+                              </td>
+                              <td className="py-3 px-3">
+                                <Badge
+                                  variant={item.is_compliant ? "success" : "error"}
+                                  label={item.is_compliant ? "Aprobado" : "Rechazado"}
+                                />
+                              </td>
+                              <td className="py-3 pl-3 text-right">
+                                <Text type="supporting">
+                                  {detectedTags.length > 0 ? detectedTags.join(" · ") : "Ninguno"}
+                                </Text>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </VStack>
           </Card>
-        </div>
-      </div>
+        </section>
+      </main>
 
-      {/* Modal Enrolamiento Biométrico */}
       <Dialog
         isOpen={enrollOpen}
         onOpenChange={(isOpen) => {
@@ -1118,17 +1182,17 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
         <form onSubmit={handleEnrollFaceSubmit}>
           <VStack gap={4}>
             <DialogHeader
-              title="Registrar Perfil Biométrico"
-              subtitle="Captura el rostro descubierto para reconocimiento facial automático"
               onOpenChange={(isOpen) => {
                 if (!isOpen && !enrolling) closeEnrollModal();
               }}
+              subtitle="Captura el rostro descubierto para reconocimiento facial automático"
+              title="Registrar Perfil Biométrico"
             />
 
             <SegmentedControl
               label="Método de captura biométrica"
-              value={enrollMode}
               layout="fill"
+              value={enrollMode}
               onChange={(val) => setEnrollMode(val as "camera" | "photo")}
             >
               <SegmentedControlItem
@@ -1203,18 +1267,18 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
             {user.role === "admin" && allUsers.length > 0 && (
               <Selector
-                label="Colaborador a registrar"
                 hasSearch
-                width="100%"
+                label="Colaborador a registrar"
                 options={userOptions}
                 value={String(enrollTargetUserId)}
+                width="100%"
                 onChange={(val) => setEnrollTargetUserId(Number(val))}
               />
             )}
 
             <TextInput
-              label="Código o carné de empleado"
               isOptional
+              label="Código o carné de empleado"
               placeholder="Ej. 2500587"
               value={enrollCode}
               onChange={setEnrollCode}
@@ -1223,16 +1287,16 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
             <HStack gap={2} hAlign="end">
               <Button
-                label="Cancelar"
-                variant="secondary"
                 isDisabled={enrolling}
+                label="Cancelar"
                 onClick={closeEnrollModal}
+                variant="secondary"
               />
               <Button
-                type="submit"
-                variant="primary"
                 isLoading={enrolling}
                 label={enrolling ? "Procesando rostro..." : "Guardar Perfil"}
+                type="submit"
+                variant="primary"
               />
             </HStack>
           </VStack>

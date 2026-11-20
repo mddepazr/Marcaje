@@ -14,6 +14,7 @@ import { VStack } from "@astryxdesign/core/VStack";
 import { api, User } from "./lib/api";
 import { CameraScanner } from "./features/CameraScanner";
 import { AdminDashboard } from "./features/AdminDashboard";
+import { ThemeSwitcher } from "./components/ui/ThemeSwitcher";
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -81,9 +82,13 @@ export function App() {
     return (
       <div
         style={{ backgroundColor: "var(--color-background-body)" }}
-        className="flex min-h-screen items-center justify-center px-4 py-8"
+        className="flex min-h-screen flex-col items-center justify-center px-4 py-8 sm:px-6"
       >
-        <Card maxWidth={440} width="100%" padding={6} elevation="low">
+        <div className="mb-4 flex w-full max-w-[440px] justify-end">
+          <ThemeSwitcher />
+        </div>
+
+        <Card elevation="low" maxWidth={440} padding={6} width="100%">
           <VStack gap={5}>
             <HStack gap={3} vAlign="center">
               <div
@@ -91,11 +96,11 @@ export function App() {
                   backgroundColor: "var(--color-background-muted)",
                   borderColor: "var(--color-border-subtle)",
                 }}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border"
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border"
               >
-                <ShieldCheck className="h-5 w-5" />
+                <ShieldCheck className="h-6 w-6" />
               </div>
-              <VStack gap={0.5}>
+              <VStack gap={1}>
                 <Heading level={2}>Control de Marcaje EPP</Heading>
                 <Text type="supporting">
                   Verificación biométrica y cumplimiento de seguridad
@@ -105,15 +110,15 @@ export function App() {
 
             <SegmentedControl
               label="Modo de autenticación"
-              value={authMode}
               layout="fill"
+              value={authMode}
               onChange={(val) => {
                 setAuthMode(val as "login" | "register");
                 setAuthError("");
               }}
             >
-              <SegmentedControlItem value="login" label="Iniciar sesión" />
-              <SegmentedControlItem value="register" label="Crear cuenta" />
+              <SegmentedControlItem label="Iniciar sesión" value="login" />
+              <SegmentedControlItem label="Crear cuenta" value="register" />
             </SegmentedControl>
 
             <Divider />
@@ -122,52 +127,52 @@ export function App() {
               <VStack gap={4}>
                 {isRegister && (
                   <TextInput
+                    isRequired
                     label="Nombre completo"
                     placeholder="Ej. Marcos de Páz"
                     value={fullName}
                     onChange={setFullName}
-                    isRequired
                     width="100%"
                   />
                 )}
 
                 <TextInput
-                  type="email"
-                  label="Correo electrónico"
-                  placeholder="colaborador@empresa.com"
-                  value={email}
-                  onChange={setEmail}
                   autoComplete="email"
                   isRequired
+                  label="Correo electrónico"
+                  placeholder="colaborador@empresa.com"
+                  type="email"
+                  value={email}
+                  onChange={setEmail}
                   width="100%"
                 />
 
                 <TextInput
-                  type="password"
-                  label="Contraseña"
-                  placeholder="Mínimo 6 caracteres"
-                  value={password}
-                  onChange={setPassword}
                   autoComplete={isRegister ? "new-password" : "current-password"}
                   isRequired
+                  label="Contraseña"
+                  placeholder="Mínimo 6 caracteres"
+                  type="password"
+                  value={password}
+                  onChange={setPassword}
                   width="100%"
                 />
 
                 {authError && (
                   <Banner
+                    description={authError}
                     status="error"
                     title="No se pudo iniciar sesión"
-                    description={authError}
                   />
                 )}
 
                 <Button
-                  type="submit"
-                  variant="primary"
-                  size="lg"
-                  width="100%"
                   isLoading={submitting}
                   label={isRegister ? "Crear cuenta e ingresar" : "Iniciar sesión"}
+                  size="lg"
+                  type="submit"
+                  variant="primary"
+                  width="100%"
                 />
               </VStack>
             </form>
