@@ -217,7 +217,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           }
 
           // 1) Verificar que no entre una segunda persona
-          const faceCheck = await analyzeVideoFaces(videoRef.current, false);
+          const faceCheck = await analyzeVideoFaces(videoRef.current, false, false);
           if (faceCheck.faceCount > 1) {
             setToast({
               type: "error",
@@ -265,7 +265,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
         // Si ya está listo en 1 paso, solo vigilar que no entre otra persona
         if (currentStage === "READY_1STEP") {
-          const quickCheck = await analyzeVideoFaces(videoRef.current, false);
+          const quickCheck = await analyzeVideoFaces(videoRef.current, false, false);
           if (quickCheck.faceCount > 1) {
             resetBiometricCycle("Alerta: Múltiples personas en cuadro", true);
           } else if (quickCheck.faceCount === 0) {
@@ -280,7 +280,8 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
         }
 
         // FASE 1: Detección de rostro, parpadeo (1/2 -> 2/2) y reconocimiento facial
-        const res = await analyzeVideoFaces(videoRef.current, true);
+        const needsDesc = blinkCountRef.current >= 1 || faceFramesCountRef.current >= 4;
+        const res = await analyzeVideoFaces(videoRef.current, true, needsDesc);
         if (cancelled) return;
 
         if (res.faceCount === 0 || !res.primaryFace) {
@@ -317,7 +318,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
         }
 
         // Respaldo natural si usa lentes que atenúan el EAR tras ~2.2s en cuadro
-        if (blinkCountRef.current < 2 && faceFramesCountRef.current >= 12) {
+        if (blinkCountRef.current < 2 && faceFramesCountRef.current >= 5) {
           blinkCountRef.current = 2;
         }
 
@@ -370,7 +371,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
       }
     };
 
-    const interval = setInterval(tick, 180);
+    const interval = setInterval(tick, 420);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -468,7 +469,8 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
     try {
       const collected: number[][] = [];
       for (let i = 0; i < 6; i++) {
-        const res = await analyzeVideoFaces(videoRef.current, true);
+        const needsDesc = blinkCountRef.current >= 1 || faceFramesCountRef.current >= 4;
+        const res = await analyzeVideoFaces(videoRef.current, true, needsDesc);
         if (res.faceCount === 1 && res.primaryFace) {
           collected.push(res.primaryFace.descriptor);
         }

@@ -42,26 +42,30 @@ function computeEyeAspectRatio(eye: Array<{ x: number; y: number }>): number {
   return (v1 + v2) / (2.0 * h);
 }
 
+/**
+ * Análisis optimizado para celular:
+ * - inputSize 192 + scoreThreshold 0.32: fluido en móviles y funciona en poca luz.
+ * - Solo calcula el descriptor pesado de 128 puntos cuando computeDescriptor=true.
+ */
 export async function analyzeVideoFaces(
   video: HTMLVideoElement,
-  withDescriptor = true
+  withLandmarks = true,
+  computeDescriptor = false
 ): Promise<FrameAnalysisResult> {
   await ensureFaceModelsLoaded();
   if (video.readyState < 2 || video.videoWidth === 0) {
     return { faceCount: 0, primaryFace: null };
   }
 
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.45 });
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 192, scoreThreshold: 0.32 });
 
-  if (withDescriptor) {
+  if (computeDescriptor) {
     const detections = await faceapi
       .detectAllFaces(video, options)
       .withFaceLandmarks()
       .withFaceDescriptors();
 
-    if (detections.length === 0) {
-      return { faceCount: 0, primaryFace: null };
-    }
+    if (detections.length === 0) return { faceCount: 0, primaryFace: null };
 
     const sorted = [...detections].sort(
       (a, b) => b.detection.box.width * b.detection.box.height - a.detection.box.width * a.detection.box.height
@@ -85,20 +89,39 @@ export async function analyzeVideoFaces(
     };
   }
 
-  const detections = await faceapi.detectAllFaces(video, options);
-  if (detections.length === 0) {
-    return { faceCount: 0, primaryFace: null };
+  if (withLandmarks) {
+    const detections = await faceapi.detectAllFaces(video, options).withFaceLandmarks();
+    if (detections.length === 0) return { faceCount: 0, primaryFace: null };
+
+    const sorted = [...detections].sort(
+      (a, b) => b.detection.box.width * b.detection.box.height - a.detection.box.width * a.detection.box.height
+    );
+    const main = sorted[0];
+    const leftEar = computeEyeAspectRatio(main.landmarks.getLeftEye());
+    const rightEar = computeEyeAspectRatio(main.landmarks.getRightEye());
+
+    return {
+      faceCount: detections.length,
+      primaryFace: {
+        box: {
+          x: main.detection.box.x,
+          y: main.detection.box.y,
+          width: main.detection.box.width,
+          height: main.detection.box.height,
+        },
+        ear: (leftEar + rightEar) / 2,
+        descriptor: [],
+      },
+    };
   }
+
+  const detections = await faceapi.detectAllFaces(video, options);
+  if (detections.length === 0) return { faceCount: 0, primaryFace: null };
   const main = detections[0];
   return {
     faceCount: detections.length,
     primaryFace: {
-      box: {
-        x: main.box.x,
-        y: main.box.y,
-        width: main.box.width,
-        height: main.box.height,
-      },
+      box: { x: main.box.x, y: main.box.y, width: main.box.width, height: main.box.height },
       ear: 0.3,
       descriptor: [],
     },
@@ -108,7 +131,7 @@ export async function analyzeVideoFaces(
 export function matchFaceDescriptor(
   descriptor: number[],
   directory: BiometricProfile[],
-  maxDistance = 0.54
+  maxDistance = 0.56
 ): { profile: BiometricProfile; similarity: number; distance: number } | null {
   if (descriptor.length !== 128 || directory.length === 0) return null;
 
@@ -131,58 +154,41 @@ export function matchFaceDescriptor(
     }
   }
 
-  if (!bestProfile || bestDistance > maxDistance) {
-    return null;
-  }
+  if (!bestProfile || bestDistance > maxDistance) return null;
 
   const similarity = Math.max(0.5, Math.min(0.999, 1 - bestDistance * 0.75));
-  return {
-    profile: bestProfile,
-    similarity,
-    distance: bestDistance,
-  };
+  return { profile: bestProfile, similarity, distance: bestDistance };
 }
 
 export function averageDescriptors(vectors: number[][]): number[] {
   if (vectors.length === 0) return [];
   const avg = new Array<number>(128).fill(0);
   for (const vec of vectors) {
-    for (let i = 0; i < 128; i++) {
-      avg[i] += vec[i];
-    }
+    for (let i = 0; i < 128; i++) avg[i] += vec[i];
   }
-  for (let i = 0; i < 128; i++) {
-    avg[i] /= vectors.length;
-  }
+  for (let i = 0; i < 128; i++) avg[i] /= vectors.length;
   return avg;
 }
 
-/**
- * Calcula presencia continua en el cuadro durante la Fase 2 (cuando el empleado se coloca
- * mascarilla/lentes) para impedir que salga de cámara o sea sustituido por otra persona.
- */
 export function sampleTorsoHeadSignature(
   video: HTMLVideoElement,
   scratchCanvas: HTMLCanvasElement
 ): { occupancy: number; centerX: number } {
-  const w = 64;
-  const h = 48;
+  const w = 48;
+  const h = 36;
   scratchCanvas.width = w;
   scratchCanvas.height = h;
   const ctx = scratchCanvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx || video.readyState < 2) {
-    return { occupancy: 1, centerX: 0.5 };
-  }
+  if (!ctx || video.readyState < 2) return { occupancy: 1, centerX: 0.5 };
 
   ctx.drawImage(video, 0, 0, w, h);
   const { data } = ctx.getImageData(0, 0, w, h);
 
-  // Estimar color promedio de los bordes superiores como referencia de fondo
   let bgR = 0;
   let bgG = 0;
   let bgB = 0;
   let bgSamples = 0;
-  for (let y = 0; y < 8; y++) {
+  for (let y = 0; y < 6; y++) {
     for (const x of [0, 1, w - 2, w - 1]) {
       const idx = (y * w + x) * 4;
       bgR += data[idx];
@@ -199,27 +205,21 @@ export function sampleTorsoHeadSignature(
   let weightedX = 0;
   let totalChecked = 0;
 
-  for (let y = 6; y < h; y++) {
-    for (let x = 10; x < w - 10; x++) {
+  for (let y = 5; y < h; y++) {
+    for (let x = 8; x < w - 8; x++) {
       const idx = (y * w + x) * 4;
       const diff =
         Math.abs(data[idx] - bgR) +
         Math.abs(data[idx + 1] - bgG) +
         Math.abs(data[idx + 2] - bgB);
       totalChecked++;
-      if (diff > 55) {
+      if (diff > 50) {
         activePixels++;
         weightedX += x / w;
       }
     }
   }
 
-  if (activePixels === 0 || totalChecked === 0) {
-    return { occupancy: 0, centerX: 0.5 };
-  }
-
-  return {
-    occupancy: activePixels / totalChecked,
-    centerX: weightedX / activePixels,
-  };
+  if (activePixels === 0 || totalChecked === 0) return { occupancy: 0, centerX: 0.5 };
+  return { occupancy: activePixels / totalChecked, centerX: weightedX / activePixels };
 }
