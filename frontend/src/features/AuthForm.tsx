@@ -11,12 +11,17 @@ export function AuthForm({ onSuccess }: Props) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (isRegister && password !== confirmPassword) {
+      setError("Las contraseñas no coinciden. Escríbelas de nuevo.");
+      return;
+    }
     setLoading(true);
     try {
       if (isRegister) {
@@ -84,6 +89,25 @@ export function AuthForm({ onSuccess }: Props) {
             />
           </div>
 
+          {isRegister && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-300">Confirmar contraseña</label>
+              <input
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Vuelve a escribir tu contraseña"
+                className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+              />
+              {confirmPassword.length > 0 && password !== confirmPassword && (
+                <p className="mt-1 text-xs text-rose-300">Las contraseñas no coinciden.</p>
+              )}
+            </div>
+          )}
+
           {error && (
             <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-300">
               {error}
@@ -104,6 +128,7 @@ export function AuthForm({ onSuccess }: Props) {
           onClick={() => {
             setIsRegister(!isRegister);
             setError("");
+            setConfirmPassword("");
           }}
           className="mt-5 w-full text-center text-xs text-slate-400 hover:text-indigo-400"
         >

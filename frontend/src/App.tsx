@@ -25,10 +25,13 @@ export function App() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const isRegister = authMode === "register";
+  const passwordsMismatch =
+    isRegister && confirmPassword.length > 0 && password !== confirmPassword;
 
   useEffect(() => {
     api
@@ -43,8 +46,20 @@ export function App() {
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
     setAuthError("");
+
+    if (isRegister) {
+      if (password.length < 6) {
+        setAuthError("La contraseña debe tener al menos 6 caracteres.");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setAuthError("Las contraseñas no coinciden. Escríbelas de nuevo.");
+        return;
+      }
+    }
+
+    setSubmitting(true);
     try {
       const loggedUser = isRegister
         ? await api.register({ full_name: fullName, email, password })
@@ -115,6 +130,7 @@ export function App() {
               onChange={(val) => {
                 setAuthMode(val as "login" | "register");
                 setAuthError("");
+                setConfirmPassword("");
               }}
             >
               <SegmentedControlItem label="Iniciar sesión" value="login" />
@@ -158,15 +174,37 @@ export function App() {
                   width="100%"
                 />
 
+                {isRegister && (
+                  <VStack gap={1}>
+                    <TextInput
+                      autoComplete="new-password"
+                      isRequired
+                      label="Confirmar contraseña"
+                      placeholder="Vuelve a escribir tu contraseña"
+                      type="password"
+                      value={confirmPassword}
+                      onChange={setConfirmPassword}
+                      width="100%"
+                    />
+                    {passwordsMismatch && (
+                      <Text type="supporting">⚠ Las contraseñas no coinciden.</Text>
+                    )}
+                    {confirmPassword.length > 0 && !passwordsMismatch && (
+                      <Text type="supporting">✓ Las contraseñas coinciden.</Text>
+                    )}
+                  </VStack>
+                )}
+
                 {authError && (
                   <Banner
                     description={authError}
                     status="error"
-                    title="No se pudo iniciar sesión"
+                    title={isRegister ? "No se pudo crear la cuenta" : "No se pudo iniciar sesión"}
                   />
                 )}
 
                 <Button
+                  isDisabled={passwordsMismatch}
                   isLoading={submitting}
                   label={isRegister ? "Crear cuenta e ingresar" : "Iniciar sesión"}
                   size="lg"

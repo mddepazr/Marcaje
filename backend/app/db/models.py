@@ -15,6 +15,7 @@ class User(Base):
     job_title: Mapped[str] = mapped_column(String(100), default="Operador General", nullable=False)
     employee_code: Mapped[str | None] = mapped_column(String(40), unique=True, nullable=True)
     face_descriptor: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    face_samples: Mapped[list | None] = mapped_column(JSON, nullable=True)
     face_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

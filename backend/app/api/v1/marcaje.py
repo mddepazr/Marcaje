@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import math
 from pathlib import Path
 import uuid
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -13,6 +14,11 @@ from app.services.vision.liveness import verify_liveness_sequence
 
 router = APIRouter(prefix="/marcaje", tags=["Marcaje EPP"])
 
+# Distancia mínima entre el rostro de dos colaboradores distintos. Si al enrolar
+# el rostro queda más cerca que esto de otro perfil, se asume que es la misma
+# persona (o una captura defectuosa) y se rechaza para no mezclar identidades.
+DUPLICATE_FACE_DISTANCE = 0.40
+
 UPLOAD_DIR = Path("/app/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -24,6 +30,35 @@ DEFAULT_ZONES = [
     ("Área de Especias", "Manipulación de materia prima y molienda", False, False, True, True),
     ("Bodega y Logística", "Carga, descarga y despacho", True, False, False, True),
 ]
+
+
+def _is_valid_descriptor(vec: object) -> bool:
+    return isinstance(vec, list) and len(vec) == 128
+
+
+def _descriptor_distance(a: list[float], b: list[float]) -> float:
+    return math.sqrt(sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)))
+
+
+def _user_reference_descriptors(user: User) -> list[list[float]]:
+    refs: list[list[float]] = []
+    if _is_valid_descriptor(user.face_descriptor):
+        refs.append(user.face_descriptor)
+    if isinstance(user.face_samples, list):
+        refs.extend(s for s in user.face_samples if _is_valid_descriptor(s))
+    return refs
+
+
+def _parse_box(raw: str | None) -> tuple[float, float, float, float] | None:
+    if not raw:
+        return None
+    try:
+        parts = [float(p) for p in raw.split(",")]
+    except ValueError:
+        return None
+    if len(parts) != 4 or parts[2] <= 0 or parts[3] <= 0:
+        return None
+    return parts[0], parts[1], parts[2], parts[3]
 
 
 def ensure_default_zones(db: Session) -> None:
@@ -90,6 +125,7 @@ def get_biometric_directory(
             job_title=u.job_title,
             employee_code=u.employee_code,
             face_descriptor=u.face_descriptor,
+            face_samples=[s for s in (u.face_samples or []) if _is_valid_descriptor(s)],
         )
         for u in users
         if isinstance(u.face_descriptor, list) and len(u.face_descriptor) == 128
@@ -125,7 +161,32 @@ def enroll_face(
             )
         target_user.employee_code = clean_code
 
-    target_user.face_descriptor = [round(float(v), 6) for v in payload.face_descriptor]
+    new_descriptor = [round(float(v), 6) for v in payload.face_descriptor]
+    new_samples = [
+        [round(float(v), 6) for v in sample] for sample in (payload.face_samples or [])
+    ] or [new_descriptor]
+
+    # Evitar que un mismo rostro quede registrado con dos nombres distintos.
+    others = db.scalars(
+        select(User).where(User.id != target_user.id, User.face_descriptor.is_not(None))
+    ).all()
+    for other in others:
+        refs = _user_reference_descriptors(other)
+        if not refs:
+            continue
+        closest = min(_descriptor_distance(s, r) for s in [new_descriptor, *new_samples] for r in refs)
+        if closest < DUPLICATE_FACE_DISTANCE:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Este rostro es demasiado parecido al perfil de {other.full_name}. "
+                    "Si es la misma persona, actualiza ese perfil; si no, repite la captura "
+                    "con mejor luz y mirando de frente."
+                ),
+            )
+
+    target_user.face_descriptor = new_descriptor
+    target_user.face_samples = new_samples
     target_user.face_enrolled_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(target_user)
@@ -146,6 +207,8 @@ def scan_ppe(
     recognized_user_id: int | None = Form(default=None),
     face_similarity: float | None = Form(default=None),
     client_liveness_verified: bool = Form(default=False),
+    face_box: str | None = Form(default=None),
+    bridge_box: str | None = Form(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -216,9 +279,14 @@ def scan_ppe(
         req_vest = False
         min_conf = cfg.min_confidence
 
-    target_bytes = frames_bytes[len(frames_bytes) // 2]
     detector = get_detector()
-    analysis = detector.analyze_image(target_bytes, conf_threshold=min_conf)
+    analysis = detector.analyze_frames(
+        frames_bytes,
+        conf_threshold=min_conf,
+        face_box=_parse_box(face_box),
+        bridge_box=_parse_box(bridge_box),
+    )
+    target_bytes = frames_bytes[analysis.get("evidence_index", len(frames_bytes) // 2)]
 
     if analysis["spoof_device_detected"]:
         raise HTTPException(

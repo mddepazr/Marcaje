@@ -17,6 +17,11 @@ CLASSES = [
     "cell phone",
     "laptop",
     "monitor",
+    # Clases distractoras (deben coincidir con DEFAULT_CLASSES en detector.py):
+    # compiten con las de EPP para reducir falsos positivos.
+    "human face",
+    "eyes",
+    "baseball cap",
 ]
 
 try:

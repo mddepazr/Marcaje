@@ -1,0 +1,12 @@
+ backend/app/api/v1/marcaje.py           |  74 [32m+++++[m[31m-[m
+ backend/app/db/models.py                |   1 [32m+[m
+ backend/app/main.py                     |   3 [32m+[m
+ backend/app/schemas/marcaje.py          |  16 [32m+[m[31m-[m
+ backend/app/services/vision/detector.py | 389 [32m++++++++++++++++++++++++++[m[31m------[m
+ backend/bake_model.py                   |   5 [32m+[m
+ frontend/src/App.tsx                    |  42 [32m+++[m[31m-[m
+ frontend/src/features/AuthForm.tsx      |  25 [32m++[m
+ frontend/src/features/CameraScanner.tsx | 115 [32m+++++++++[m[31m-[m
+ frontend/src/lib/api.ts                 |  20 [32m+[m[31m-[m
+ frontend/src/lib/faceBiometrics.ts      | 257 [32m+++++++++++++++++[m[31m----[m
+ 11 files changed, 817 insertions(+), 130 deletions(-)

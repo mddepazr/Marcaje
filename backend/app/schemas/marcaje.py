@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DetectionItem(BaseModel):
@@ -28,12 +28,26 @@ class BiometricProfileOut(BaseModel):
     job_title: str
     employee_code: str | None = None
     face_descriptor: list[float]
+    face_samples: list[list[float]] = []
 
 
 class FaceEnrollIn(BaseModel):
     user_id: int | None = None
     employee_code: str | None = Field(default=None, max_length=40)
     face_descriptor: list[float] = Field(min_length=128, max_length=128)
+    # Muestras individuales capturadas al enrolar (hasta 8). Mejoran la precisión
+    # porque cada persona se compara contra varias tomas y no solo contra el promedio.
+    face_samples: list[list[float]] | None = Field(default=None, max_length=8)
+
+    @field_validator("face_samples")
+    @classmethod
+    def _validate_samples(cls, v: list[list[float]] | None) -> list[list[float]] | None:
+        if v is None:
+            return v
+        for sample in v:
+            if len(sample) != 128:
+                raise ValueError("Cada muestra facial debe tener 128 valores.")
+        return v
 
 
 class MarcajeOut(BaseModel):

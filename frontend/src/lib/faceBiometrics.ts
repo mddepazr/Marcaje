@@ -1,6 +1,19 @@
 import * as faceapi from "@vladmandic/face-api";
 import { BiometricProfile } from "./api";
 
+/**
+ * Parámetros de reconocimiento facial.
+ *
+ * - FACE_MATCH_THRESHOLD: distancia euclidiana máxima para aceptar a alguien.
+ *   El valor anterior (0.56) era muy permisivo: con pocas personas enroladas,
+ *   cualquier rostro "parecido" caía dentro y se asignaba al perfil más cercano.
+ * - FACE_AMBIGUITY_MARGIN: si el segundo perfil más cercano está casi a la misma
+ *   distancia que el primero, no se identifica a nadie (evita confundir personas).
+ */
+export const FACE_MATCH_THRESHOLD = 0.45;
+export const FACE_AMBIGUITY_MARGIN = 0.06;
+export const ENROLL_MAX_SAMPLE_SPREAD = 0.42;
+
 let modelsLoaded = false;
 let loadingPromise: Promise<void> | null = null;
 
@@ -9,6 +22,9 @@ export async function ensureFaceModelsLoaded(): Promise<void> {
   if (!loadingPromise) {
     loadingPromise = Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri("/models"),
+      // SSD MobileNet es más lento que TinyFaceDetector pero da una caja de rostro
+      // mucho más precisa, lo que produce descriptores faciales más confiables.
+      faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
       faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
       faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
     ]).then(() => {
@@ -18,10 +34,29 @@ export async function ensureFaceModelsLoaded(): Promise<void> {
   return loadingPromise;
 }
 
+export interface FaceQuality {
+  ok: boolean;
+  reason?: string;
+}
+
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface DetectedFaceFrame {
-  box: { x: number; y: number; width: number; height: number };
+  box: Box;
   ear: number;
   descriptor: number[];
+  score: number;
+  quality: FaceQuality;
+  /**
+   * Zona del puente de la nariz entre ambos ojos. El servidor busca ahí el
+   * puente de la montura para confirmar que realmente hay lentes puestos.
+   */
+  bridgeBox?: Box;
 }
 
 export interface FrameAnalysisResult {
@@ -29,17 +64,81 @@ export interface FrameAnalysisResult {
   primaryFace: DetectedFaceFrame | null;
 }
 
-function pointDist(a: { x: number; y: number }, b: { x: number; y: number }): number {
+type Point = { x: number; y: number };
+
+function computeBridgeBox(positions: Point[] | null): Box | undefined {
+  if (!positions || positions.length < 68) return undefined;
+  const innerLeft = positions[39];
+  const innerRight = positions[42];
+  const bridgeTop = positions[27];
+  const bridgeLow = positions[29];
+  const eyeGap = innerRight.x - innerLeft.x;
+  if (eyeGap < 6) return undefined;
+  const y1 = bridgeTop.y - eyeGap * 0.25;
+  const y2 = bridgeLow.y;
+  if (y2 - y1 < 6) return undefined;
+  return { x: innerLeft.x, y: y1, width: eyeGap, height: y2 - y1 };
+}
+
+function pointDist(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function computeEyeAspectRatio(eye: Array<{ x: number; y: number }>): number {
+function computeEyeAspectRatio(eye: Point[]): number {
   if (eye.length < 6) return 0.3;
   const v1 = pointDist(eye[1], eye[5]);
   const v2 = pointDist(eye[2], eye[4]);
   const h = pointDist(eye[0], eye[3]);
   if (h <= 0.0001) return 0.3;
   return (v1 + v2) / (2.0 * h);
+}
+
+/**
+ * Evalúa si un rostro sirve para comparar biometría: tamaño suficiente,
+ * detección confiable y cabeza mirando de frente (sin girar ni inclinar mucho).
+ * Los descriptores de rostros pequeños, borrosos o de perfil son los que más
+ * generan falsos positivos.
+ */
+function evaluateFaceQuality(
+  box: { width: number; height: number },
+  score: number,
+  positions: Point[] | null,
+  frameWidth: number,
+  minScore = 0.6
+): FaceQuality {
+  const minFaceWidth = Math.max(80, frameWidth * 0.1);
+  if (box.width < minFaceWidth) {
+    return { ok: false, reason: "Acércate un poco más a la cámara" };
+  }
+  if (score < minScore) {
+    return { ok: false, reason: "Rostro poco nítido · Mejora la iluminación" };
+  }
+  if (positions && positions.length >= 68) {
+    const leftEyeOuter = positions[36];
+    const rightEyeOuter = positions[45];
+    const noseTip = positions[30];
+    const eyeSpan = rightEyeOuter.x - leftEyeOuter.x;
+    if (Math.abs(eyeSpan) > 1) {
+      const yawRatio = (noseTip.x - leftEyeOuter.x) / eyeSpan;
+      if (yawRatio < 0.3 || yawRatio > 0.7) {
+        return { ok: false, reason: "Mira de frente a la cámara" };
+      }
+    }
+    const rollDeg =
+      (Math.atan2(rightEyeOuter.y - leftEyeOuter.y, rightEyeOuter.x - leftEyeOuter.x) * 180) /
+      Math.PI;
+    if (Math.abs(rollDeg) > 20) {
+      return { ok: false, reason: "Endereza la cabeza" };
+    }
+  }
+  return { ok: true };
+}
+
+function largestFirst<T extends { detection: faceapi.FaceDetection }>(items: T[]): T[] {
+  return [...items].sort(
+    (a, b) =>
+      b.detection.box.width * b.detection.box.height - a.detection.box.width * a.detection.box.height
+  );
 }
 
 export async function analyzeVideoFaces(
@@ -52,73 +151,82 @@ export async function analyzeVideoFaces(
     return { faceCount: 0, primaryFace: null };
   }
 
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 192, scoreThreshold: 0.32 });
+  const tinyOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.35 });
 
   if (computeDescriptor) {
+    const ssdOptions = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, maxResults: 5 });
     const detections = await faceapi
-      .detectAllFaces(video, options)
+      .detectAllFaces(video, ssdOptions)
       .withFaceLandmarks()
       .withFaceDescriptors();
 
     if (detections.length === 0) return { faceCount: 0, primaryFace: null };
 
-    const sorted = [...detections].sort(
-      (a, b) => b.detection.box.width * b.detection.box.height - a.detection.box.width * a.detection.box.height
-    );
-    const main = sorted[0];
+    const main = largestFirst(detections)[0];
     const leftEar = computeEyeAspectRatio(main.landmarks.getLeftEye());
     const rightEar = computeEyeAspectRatio(main.landmarks.getRightEye());
+    const box = main.detection.box;
 
     return {
       faceCount: detections.length,
       primaryFace: {
-        box: {
-          x: main.detection.box.x,
-          y: main.detection.box.y,
-          width: main.detection.box.width,
-          height: main.detection.box.height,
-        },
+        box: { x: box.x, y: box.y, width: box.width, height: box.height },
         ear: (leftEar + rightEar) / 2,
         descriptor: Array.from(main.descriptor),
+        score: main.detection.score,
+        bridgeBox: computeBridgeBox(main.landmarks.positions),
+        quality: evaluateFaceQuality(
+          box,
+          main.detection.score,
+          main.landmarks.positions,
+          video.videoWidth,
+          0.7
+        ),
       },
     };
   }
 
   if (withLandmarks) {
-    const detections = await faceapi.detectAllFaces(video, options).withFaceLandmarks();
+    const detections = await faceapi.detectAllFaces(video, tinyOptions).withFaceLandmarks();
     if (detections.length === 0) return { faceCount: 0, primaryFace: null };
 
-    const sorted = [...detections].sort(
-      (a, b) => b.detection.box.width * b.detection.box.height - a.detection.box.width * a.detection.box.height
-    );
-    const main = sorted[0];
+    const main = largestFirst(detections)[0];
     const leftEar = computeEyeAspectRatio(main.landmarks.getLeftEye());
     const rightEar = computeEyeAspectRatio(main.landmarks.getRightEye());
+    const box = main.detection.box;
 
     return {
       faceCount: detections.length,
       primaryFace: {
-        box: {
-          x: main.detection.box.x,
-          y: main.detection.box.y,
-          width: main.detection.box.width,
-          height: main.detection.box.height,
-        },
+        box: { x: box.x, y: box.y, width: box.width, height: box.height },
         ear: (leftEar + rightEar) / 2,
         descriptor: [],
+        score: main.detection.score,
+        bridgeBox: computeBridgeBox(main.landmarks.positions),
+        quality: evaluateFaceQuality(
+          box,
+          main.detection.score,
+          main.landmarks.positions,
+          video.videoWidth,
+          0.45
+        ),
       },
     };
   }
 
-  const detections = await faceapi.detectAllFaces(video, options);
+  const detections = await faceapi.detectAllFaces(video, tinyOptions);
   if (detections.length === 0) return { faceCount: 0, primaryFace: null };
-  const main = detections[0];
+  const main = [...detections].sort(
+    (a, b) => b.box.width * b.box.height - a.box.width * a.box.height
+  )[0];
   return {
     faceCount: detections.length,
     primaryFace: {
       box: { x: main.box.x, y: main.box.y, width: main.box.width, height: main.box.height },
       ear: 0.3,
       descriptor: [],
+      score: main.score,
+      quality: { ok: true },
     },
   };
 }
@@ -134,11 +242,18 @@ export async function extractDescriptorFromImageFile(file: File): Promise<number
       el.src = objectUrl;
     });
 
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.3 });
-    const detections = await faceapi
-      .detectAllFaces(img, options)
+    let detections = await faceapi
+      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, maxResults: 5 }))
       .withFaceLandmarks()
       .withFaceDescriptors();
+
+    if (detections.length === 0) {
+      // Respaldo para fotos con poca luz donde SSD no encuentra el rostro.
+      detections = await faceapi
+        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.3 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+    }
 
     if (detections.length === 0) {
       throw new Error("No se detectó ningún rostro claro en la foto. Usa una imagen frontal con buena luz.");
@@ -147,42 +262,85 @@ export async function extractDescriptorFromImageFile(file: File): Promise<number
       throw new Error("Se detectaron varios rostros en la foto. Sube una foto donde aparezca solo una persona.");
     }
 
-    return Array.from(detections[0].descriptor);
+    const main = detections[0];
+    const quality = evaluateFaceQuality(
+      main.detection.box,
+      main.detection.score,
+      main.landmarks.positions,
+      img.naturalWidth || img.width,
+      0.5
+    );
+    if (!quality.ok) {
+      throw new Error(
+        `La foto no sirve para enrolar (${quality.reason?.toLowerCase()}). Usa una foto frontal, cercana y con buena luz.`
+      );
+    }
+
+    return Array.from(main.descriptor);
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
 }
 
+export function descriptorDistance(a: number[], b: number[]): number {
+  if (a.length !== 128 || b.length !== 128) return Number.POSITIVE_INFINITY;
+  let sumSq = 0;
+  for (let i = 0; i < 128; i++) {
+    const diff = a[i] - b[i];
+    sumSq += diff * diff;
+  }
+  return Math.sqrt(sumSq);
+}
+
+/** Distancia de un descriptor a un perfil: la menor entre su promedio y sus muestras. */
+export function profileDistance(descriptor: number[], profile: BiometricProfile): number {
+  let best = Number.POSITIVE_INFINITY;
+  const refs: number[][] = [];
+  if (Array.isArray(profile.face_descriptor)) refs.push(profile.face_descriptor);
+  if (Array.isArray(profile.face_samples)) refs.push(...profile.face_samples);
+  for (const ref of refs) {
+    if (!Array.isArray(ref) || ref.length !== 128) continue;
+    best = Math.min(best, descriptorDistance(descriptor, ref));
+  }
+  return best;
+}
+
+export function distanceToSimilarity(distance: number): number {
+  return Math.max(0, Math.min(0.999, 1 - distance * 0.8));
+}
+
 export function matchFaceDescriptor(
   descriptor: number[],
   directory: BiometricProfile[],
-  maxDistance = 0.56
+  maxDistance = FACE_MATCH_THRESHOLD,
+  ambiguityMargin = FACE_AMBIGUITY_MARGIN
 ): { profile: BiometricProfile; similarity: number; distance: number } | null {
   if (descriptor.length !== 128 || directory.length === 0) return null;
 
   let bestProfile: BiometricProfile | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
+  let secondDistance = Number.POSITIVE_INFINITY;
 
   for (const candidate of directory) {
-    if (!Array.isArray(candidate.face_descriptor) || candidate.face_descriptor.length !== 128) {
-      continue;
-    }
-    let sumSq = 0;
-    for (let i = 0; i < 128; i++) {
-      const diff = descriptor[i] - candidate.face_descriptor[i];
-      sumSq += diff * diff;
-    }
-    const dist = Math.sqrt(sumSq);
+    const dist = profileDistance(descriptor, candidate);
+    if (!Number.isFinite(dist)) continue;
     if (dist < bestDistance) {
+      secondDistance = bestDistance;
       bestDistance = dist;
       bestProfile = candidate;
+    } else if (dist < secondDistance) {
+      secondDistance = dist;
     }
   }
 
   if (!bestProfile || bestDistance > maxDistance) return null;
 
-  const similarity = Math.max(0.5, Math.min(0.999, 1 - bestDistance * 0.75));
-  return { profile: bestProfile, similarity, distance: bestDistance };
+  // Si dos perfiles distintos quedan casi empatados, el resultado no es confiable.
+  if (Number.isFinite(secondDistance) && secondDistance - bestDistance < ambiguityMargin) {
+    return null;
+  }
+
+  return { profile: bestProfile, similarity: distanceToSimilarity(bestDistance), distance: bestDistance };
 }
 
 export function averageDescriptors(vectors: number[][]): number[] {
@@ -193,6 +351,17 @@ export function averageDescriptors(vectors: number[][]): number[] {
   }
   for (let i = 0; i < 128; i++) avg[i] /= vectors.length;
   return avg;
+}
+
+/** Mayor distancia entre dos muestras: si es alta, las muestras no son de la misma persona o salieron mal. */
+export function maxPairwiseDistance(vectors: number[][]): number {
+  let maxDist = 0;
+  for (let i = 0; i < vectors.length; i++) {
+    for (let j = i + 1; j < vectors.length; j++) {
+      maxDist = Math.max(maxDist, descriptorDistance(vectors[i], vectors[j]));
+    }
+  }
+  return maxDist;
 }
 
 export function sampleTorsoHeadSignature(

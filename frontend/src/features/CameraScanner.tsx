@@ -46,9 +46,13 @@ import {
 import {
   analyzeVideoFaces,
   averageDescriptors,
+  Box,
+  distanceToSimilarity,
+  ENROLL_MAX_SAMPLE_SPREAD,
   ensureFaceModelsLoaded,
   extractDescriptorFromImageFile,
   matchFaceDescriptor,
+  maxPairwiseDistance,
   sampleTorsoHeadSignature,
 } from "../lib/faceBiometrics";
 import { Toast, ToastData } from "../components/ui/Toast";
@@ -70,6 +74,14 @@ type KioskStage =
   | "SUBMITTING";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Fotogramas seguidos que deben coincidir con la MISMA persona antes de identificarla. */
+const REQUIRED_MATCH_FRAMES = 3;
+/** Fotogramas seguidos sin coincidencia antes de declarar "rostro no reconocido". */
+const UNKNOWN_FRAMES_BEFORE_REJECT = 3;
+/** Muestras faciales que se guardan al enrolar desde cámara. */
+const ENROLL_TARGET_SAMPLES = 5;
+const ENROLL_MIN_SAMPLES = 3;
 
 export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -124,6 +136,8 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
   const trackedCenterXRef = useRef<number>(0.5);
   const lowOccupancyFramesRef = useRef<number>(0);
   const phase2DeadlineRef = useRef<number>(0);
+  const matchStreakRef = useRef<{ id: number | null; distances: number[] }>({ id: null, distances: [] });
+  const unknownFramesRef = useRef<number>(0);
 
   stageRef.current = stage;
 
@@ -159,6 +173,8 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
     eyeClosedRef.current = false;
     faceFramesCountRef.current = 0;
     lowOccupancyFramesRef.current = 0;
+    matchStreakRef.current = { id: null, distances: [] };
+    unknownFramesRef.current = 0;
     setIdentifiedProfile(null);
     setIdentifiedSimilarity(null);
 
@@ -359,17 +375,54 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           return;
         }
 
-        const match = matchFaceDescriptor(descriptor, biometricDir);
-        if (!match) {
-          setPillTone("red");
-          setStatusPill("Rostro no reconocido");
-          blinkCountRef.current = 0;
-          faceFramesCountRef.current = 0;
+        // Esperar a un fotograma con descriptor calculado (SSD + landmarks).
+        if (descriptor.length !== 128) return;
+
+        // Solo comparar rostros nítidos, cercanos y de frente.
+        if (!res.primaryFace.quality.ok) {
+          matchStreakRef.current = { id: null, distances: [] };
+          setPillTone("amber");
+          setStatusPill(res.primaryFace.quality.reason || "Mantén el rostro quieto y de frente");
           return;
         }
 
+        const match = matchFaceDescriptor(descriptor, biometricDir);
+        if (!match) {
+          matchStreakRef.current = { id: null, distances: [] };
+          unknownFramesRef.current += 1;
+          if (unknownFramesRef.current >= UNKNOWN_FRAMES_BEFORE_REJECT) {
+            setPillTone("red");
+            setStatusPill("Rostro no reconocido");
+            blinkCountRef.current = 0;
+            faceFramesCountRef.current = 0;
+            unknownFramesRef.current = 0;
+          } else {
+            setPillTone("amber");
+            setStatusPill("Verificando identidad...");
+          }
+          return;
+        }
+        unknownFramesRef.current = 0;
+
+        // Votación temporal: varios fotogramas seguidos deben apuntar a la misma persona.
+        const streak = matchStreakRef.current;
+        if (streak.id === match.profile.id) {
+          streak.distances.push(match.distance);
+        } else {
+          matchStreakRef.current = { id: match.profile.id, distances: [match.distance] };
+        }
+        const confirmedFrames = matchStreakRef.current.distances.length;
+        if (confirmedFrames < REQUIRED_MATCH_FRAMES) {
+          setPillTone("amber");
+          setStatusPill(`Verificando identidad ${confirmedFrames}/${REQUIRED_MATCH_FRAMES}...`);
+          return;
+        }
+
+        const distances = matchStreakRef.current.distances;
+        const avgDistance = distances.reduce((acc, d) => acc + d, 0) / distances.length;
+
         setIdentifiedProfile(match.profile);
-        setIdentifiedSimilarity(match.similarity);
+        setIdentifiedSimilarity(distanceToSimilarity(avgDistance));
         lowOccupancyFramesRef.current = 0;
 
         if (trackingCanvasRef.current) {
@@ -440,6 +493,23 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
     setStatusPill("Analizando EPP y registrando...");
 
     try {
+      // Ubicación actual del rostro: el servidor la usa para validar que los lentes,
+      // la mascarilla y el casco estén realmente sobre la cara y no en otra parte.
+      let faceBox: Box | undefined;
+      let bridgeBox: Box | undefined;
+      if (modelsReady && videoRef.current) {
+        try {
+          const faceNow = await analyzeVideoFaces(videoRef.current, true, false);
+          if (faceNow.faceCount === 1 && faceNow.primaryFace) {
+            faceBox = faceNow.primaryFace.box;
+            bridgeBox = faceNow.primaryFace.bridgeBox;
+          }
+        } catch {
+          faceBox = undefined;
+          bridgeBox = undefined;
+        }
+      }
+
       const blobs: Blob[] = [];
       for (let i = 0; i < 3; i++) {
         const frame = await grabSingleFrame();
@@ -453,6 +523,8 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
         recognizedUserId: identifiedProfile?.id,
         faceSimilarity: identifiedSimilarity ?? undefined,
         clientLivenessVerified: Boolean(identifiedProfile),
+        faceBox,
+        bridgeBox,
       });
 
       setLastResult(result);
@@ -498,39 +570,57 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
     try {
       let descriptorToSave: number[] = [];
+      let samplesToSave: number[][] = [];
 
       if (enrollMode === "photo") {
         if (!enrollPhotoFile) {
           throw new Error("Selecciona una fotografía frontal primero.");
         }
         descriptorToSave = await extractDescriptorFromImageFile(enrollPhotoFile);
+        samplesToSave = [descriptorToSave];
       } else {
         const sourceVideo = enrollVideoRef.current || videoRef.current;
         if (!sourceVideo || !cameraReady) {
           throw new Error("La cámara no está disponible. Usa la pestaña 'Desde fotografía'.");
         }
         const collected: number[][] = [];
-        for (let i = 0; i < 6; i++) {
+        let lastQualityIssue = "";
+        for (let i = 0; i < 16 && collected.length < ENROLL_TARGET_SAMPLES; i++) {
           const res = await analyzeVideoFaces(sourceVideo, true, true);
-          if (res.faceCount === 1 && res.primaryFace) {
-            collected.push(res.primaryFace.descriptor);
+          if (res.faceCount > 1) {
+            throw new Error("Hay más de una persona en cámara. Enrola a una sola persona a la vez.");
           }
-          if (collected.length >= 3) break;
-          await sleep(220);
+          if (res.faceCount === 1 && res.primaryFace) {
+            if (res.primaryFace.quality.ok) {
+              collected.push(res.primaryFace.descriptor);
+            } else {
+              lastQualityIssue = res.primaryFace.quality.reason || "";
+            }
+          }
+          await sleep(250);
         }
 
-        if (collected.length < 2) {
+        if (collected.length < ENROLL_MIN_SAMPLES) {
           throw new Error(
-            "Poca iluminación o rostro fuera de foco. Enciende una luz o usa la pestaña 'Desde fotografía'."
+            lastQualityIssue
+              ? `No se pudo capturar un rostro claro: ${lastQualityIssue.toLowerCase()}.`
+              : "Poca iluminación o rostro fuera de foco. Enciende una luz o usa la pestaña 'Desde fotografía'."
+          );
+        }
+        if (maxPairwiseDistance(collected) > ENROLL_MAX_SAMPLE_SPREAD) {
+          throw new Error(
+            "Las capturas no fueron consistentes (te moviste o cambió la luz). Quédate quieto mirando a la cámara e inténtalo de nuevo."
           );
         }
         descriptorToSave = averageDescriptors(collected);
+        samplesToSave = collected;
       }
 
       const saved = await api.enrollFace({
         user_id: user.role === "admin" ? enrollTargetUserId : user.id,
         employee_code: enrollCode.trim() || undefined,
         face_descriptor: descriptorToSave,
+        face_samples: samplesToSave,
       });
 
       await loadData();
@@ -1221,6 +1311,9 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                 />
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="h-36 w-28 rounded-full border-2 border-dashed border-emerald-400/80" />
+                </div>
+                <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-white/90">
+                  Rostro descubierto, de frente y quieto ~4 s al guardar
                 </div>
               </div>
             ) : (

@@ -33,6 +33,7 @@ export interface BiometricProfile {
   job_title: string;
   employee_code?: string | null;
   face_descriptor: number[];
+  face_samples?: number[][];
 }
 
 export interface MarcajeRecord {
@@ -112,6 +113,10 @@ export interface ScanRequestMeta {
   recognizedUserId?: number;
   faceSimilarity?: number;
   clientLivenessVerified?: boolean;
+  /** Caja del rostro (x, y, ancho, alto) en píxeles del fotograma enviado. */
+  faceBox?: { x: number; y: number; width: number; height: number };
+  /** Zona del puente nasal entre los ojos, para confirmar lentes. */
+  bridgeBox?: { x: number; y: number; width: number; height: number };
 }
 
 async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 665000): Promise<T> {
@@ -199,7 +204,12 @@ export const api = {
 
   getBiometricDirectory: () => request<BiometricProfile[]>("/marcaje/biometric-directory"),
 
-  enrollFace: (data: { user_id?: number; employee_code?: string; face_descriptor: number[] }) =>
+  enrollFace: (data: {
+    user_id?: number;
+    employee_code?: string;
+    face_descriptor: number[];
+    face_samples?: number[][];
+  }) =>
     request<{ message: string; user_id: number; full_name: string }>("/marcaje/enroll-face", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -240,6 +250,14 @@ export const api = {
     }
     if (meta?.clientLivenessVerified) {
       formData.append("client_liveness_verified", "true");
+    }
+    if (meta?.faceBox) {
+      const { x, y, width, height } = meta.faceBox;
+      formData.append("face_box", [x, y, width, height].map((v) => Math.round(v)).join(","));
+    }
+    if (meta?.bridgeBox) {
+      const { x, y, width, height } = meta.bridgeBox;
+      formData.append("bridge_box", [x, y, width, height].map((v) => Math.round(v)).join(","));
     }
     return request<MarcajeRecord>(
       "/marcaje/scan",

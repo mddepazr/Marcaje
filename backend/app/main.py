@@ -25,6 +25,9 @@ async def lifespan(app: FastAPI):
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS face_descriptor JSON")
         )
         conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS face_samples JSON")
+        )
+        conn.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS face_enrolled_at TIMESTAMPTZ")
         )
         conn.execute(
