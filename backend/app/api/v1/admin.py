@@ -3,10 +3,11 @@ import io
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
-from app.api.v1.marcaje import ensure_default_zones, get_or_create_settings
+from app.api.v1.marcaje import ensure_default_zones, get_or_create_settings, resolve_kiosk_zone
 from app.db.models import AttendanceRecord, JobRole, User, WorkZone
 from app.db.session import get_db
 from app.schemas.admin import (
@@ -34,6 +35,10 @@ DEFAULT_ROLES = [
     ("Supervisor de Seguridad", True),
     ("Administrador", True),
 ]
+
+
+class KioskZoneSelectIn(BaseModel):
+    active_zone_id: int
 
 
 def ensure_default_roles(db: Session) -> None:
@@ -156,6 +161,29 @@ def update_work_zone(
     return zone
 
 
+@router.put("/kiosk-config", response_model=WorkZoneOut)
+def set_active_kiosk_zone(
+    payload: KioskZoneSelectIn,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    zone = db.get(WorkZone, payload.active_zone_id)
+    if not zone or not zone.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El área seleccionada no existe o está inactiva.",
+        )
+    cfg = get_or_create_settings(db)
+    cfg.active_zone_id = zone.id
+    cfg.zone_name = zone.name
+    cfg.require_helmet = zone.require_helmet
+    cfg.require_glasses = zone.require_glasses
+    cfg.require_mask = zone.require_mask
+    cfg.min_confidence = zone.min_confidence
+    db.commit()
+    return zone
+
+
 @router.get("/settings", response_model=MarcajeSettingsOut)
 def read_settings(
     current_user: User = Depends(get_current_user),
@@ -212,7 +240,9 @@ def get_admin_stats(
 def list_all_records(
     status_filter: str = Query(default="all"),
     search: str = Query(default=""),
-    limit: int = Query(default=100, le=500),
+    zone_name: str = Query(default=""),
+    user_id: int | None = Query(default=None),
+    limit: int = Query(default=200, le=500),
     admin_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -227,6 +257,12 @@ def list_all_records(
         stmt = stmt.where(AttendanceRecord.is_compliant.is_(True))
     elif status_filter == "rejected":
         stmt = stmt.where(AttendanceRecord.is_compliant.is_(False))
+
+    if zone_name.strip():
+        stmt = stmt.where(AttendanceRecord.zone_name == zone_name.strip())
+
+    if user_id is not None:
+        stmt = stmt.where(AttendanceRecord.user_id == user_id)
 
     if search.strip():
         term = f"%{search.strip()}%"

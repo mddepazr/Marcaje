@@ -3,9 +3,10 @@ import math
 from pathlib import Path
 import uuid
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_optional_user
 from app.db.models import AttendanceRecord, MarcajeSettings, User, WorkZone
 from app.db.session import get_db
 from app.schemas.marcaje import BiometricProfileOut, FaceEnrollIn, MarcajeOut, WorkZoneOut
@@ -14,10 +15,7 @@ from app.services.vision.liveness import verify_liveness_sequence
 
 router = APIRouter(prefix="/marcaje", tags=["Marcaje EPP"])
 
-# Distancia mínima entre el rostro de dos colaboradores distintos. Si al enrolar
-# el rostro queda más cerca que esto de otro perfil, se asume que es la misma
-# persona (o una captura defectuosa) y se rechaza para no mezclar identidades.
-DUPLICATE_FACE_DISTANCE = 0.40
+DUPLICATE_FACE_DISTANCE = 0.42
 
 UPLOAD_DIR = Path("/app/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -30,6 +28,11 @@ DEFAULT_ZONES = [
     ("Área de Especias", "Manipulación de materia prima y molienda", False, False, True, True),
     ("Bodega y Logística", "Carga, descarga y despacho", True, False, False, True),
 ]
+
+
+class KioskConfigOut(BaseModel):
+    active_zone_id: int | None = None
+    active_zone: WorkZoneOut | None = None
 
 
 def _is_valid_descriptor(vec: object) -> bool:
@@ -97,21 +100,34 @@ def get_or_create_settings(db: Session) -> MarcajeSettings:
     return cfg
 
 
+def resolve_kiosk_zone(db: Session) -> WorkZone | None:
+    ensure_default_zones(db)
+    cfg = get_or_create_settings(db)
+    if cfg.active_zone_id is not None:
+        zone = db.get(WorkZone, cfg.active_zone_id)
+        if zone and zone.is_active:
+            return zone
+    return db.scalar(select(WorkZone).where(WorkZone.is_active.is_(True)).order_by(WorkZone.id.asc()))
+
+
 @router.get("/zones", response_model=list[WorkZoneOut])
-def list_active_zones(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
+def list_active_zones(db: Session = Depends(get_db)):
     ensure_default_zones(db)
     stmt = select(WorkZone).where(WorkZone.is_active.is_(True)).order_by(WorkZone.id.asc())
     return list(db.scalars(stmt).all())
 
 
+@router.get("/kiosk-config", response_model=KioskConfigOut)
+def get_kiosk_config(db: Session = Depends(get_db)):
+    zone = resolve_kiosk_zone(db)
+    return KioskConfigOut(
+        active_zone_id=zone.id if zone else None,
+        active_zone=WorkZoneOut.model_validate(zone) if zone else None,
+    )
+
+
 @router.get("/biometric-directory", response_model=list[BiometricProfileOut])
-def get_biometric_directory(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
+def get_biometric_directory(db: Session = Depends(get_db)):
     stmt = (
         select(User)
         .where(User.is_active.is_(True), User.face_descriptor.is_not(None))
@@ -166,7 +182,6 @@ def enroll_face(
         [round(float(v), 6) for v in sample] for sample in (payload.face_samples or [])
     ] or [new_descriptor]
 
-    # Evitar que un mismo rostro quede registrado con dos nombres distintos.
     others = db.scalars(
         select(User).where(User.id != target_user.id, User.face_descriptor.is_not(None))
     ).all()
@@ -209,7 +224,7 @@ def scan_ppe(
     client_liveness_verified: bool = Form(default=False),
     face_box: str | None = Form(default=None),
     bridge_box: str | None = Form(default=None),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     if not files:
@@ -219,8 +234,9 @@ def scan_ppe(
     if normalized_event not in {"ENTRY", "EXIT"}:
         normalized_event = "ENTRY"
 
-    target_user = current_user
+    target_user: User | None = None
     recognition_method = "session"
+
     if recognized_user_id is not None:
         matched = db.get(User, recognized_user_id)
         if not matched or not matched.is_active:
@@ -228,8 +244,21 @@ def scan_ppe(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="El colaborador identificado no está activo en el sistema.",
             )
+        if not _is_valid_descriptor(matched.face_descriptor):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El colaborador aún no tiene un perfil biométrico válido.",
+            )
         target_user = matched
         recognition_method = "face_biometric"
+    elif current_user is not None:
+        target_user = current_user
+        recognition_method = "session"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Mira a la cámara para identificarte automáticamente antes de marcar.",
+        )
 
     frames_bytes: list[bytes] = []
     for f in files[:3]:
@@ -260,8 +289,8 @@ def scan_ppe(
 
     ensure_default_zones(db)
     zone = db.get(WorkZone, zone_id) if zone_id is not None else None
-    if zone is None:
-        zone = db.scalar(select(WorkZone).where(WorkZone.is_active.is_(True)).order_by(WorkZone.id.asc()))
+    if zone is None or not zone.is_active:
+        zone = resolve_kiosk_zone(db)
 
     if zone is not None:
         zone_name = zone.name
@@ -365,18 +394,16 @@ def scan_ppe(
 @router.get("/history", response_model=list[MarcajeOut])
 def get_history(
     limit: int = 20,
-    kiosk: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     stmt = (
         select(AttendanceRecord, User)
         .join(User, AttendanceRecord.user_id == User.id)
+        .where(AttendanceRecord.user_id == current_user.id)
         .order_by(AttendanceRecord.created_at.desc())
         .limit(min(limit, 100))
     )
-    if not kiosk:
-        stmt = stmt.where(AttendanceRecord.user_id == current_user.id)
 
     rows = db.execute(stmt).all()
     return [

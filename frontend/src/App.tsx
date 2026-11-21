@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -19,6 +19,7 @@ import { ThemeSwitcher } from "./components/ui/ThemeSwitcher";
 export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showAuthScreen, setShowAuthScreen] = useState(false);
   const [activeView, setActiveView] = useState<"scanner" | "admin">("scanner");
 
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -65,6 +66,11 @@ export function App() {
         ? await api.register({ full_name: fullName, email, password })
         : await api.login({ email, password });
       setUser(loggedUser);
+      setShowAuthScreen(false);
+      setFullName("");
+      setEmail("");
+      setPassword("");
+      setConfirmPassword("");
       setActiveView(loggedUser.role === "admin" ? "admin" : "scanner");
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Error de autenticación");
@@ -76,6 +82,7 @@ export function App() {
   const handleLogout = async () => {
     await api.logout().catch(() => {});
     setUser(null);
+    setShowAuthScreen(false);
     setActiveView("scanner");
   };
 
@@ -87,19 +94,29 @@ export function App() {
       >
         <HStack gap={3} vAlign="center">
           <Spinner size="sm" />
-          <Text type="supporting">Verificando sesión segura...</Text>
+          <Text type="supporting">Iniciando terminal biométrica...</Text>
         </HStack>
       </div>
     );
   }
 
-  if (!user) {
+  if (!user && showAuthScreen) {
     return (
       <div
         style={{ backgroundColor: "var(--color-background-body)" }}
         className="flex min-h-screen flex-col items-center justify-center px-4 py-8 sm:px-6"
       >
-        <div className="mb-4 flex w-full max-w-[440px] justify-end">
+        <div className="mb-4 flex w-full max-w-[440px] items-center justify-between gap-2">
+          <Button
+            icon={<ArrowLeft className="h-3.5 w-3.5" />}
+            label="Volver al Marcaje"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setShowAuthScreen(false);
+              setAuthError("");
+            }}
+          />
           <ThemeSwitcher />
         </div>
 
@@ -116,9 +133,9 @@ export function App() {
                 <ShieldCheck className="h-6 w-6" />
               </div>
               <VStack gap={1}>
-                <Heading level={2}>Control de Marcaje EPP</Heading>
+                <Heading level={2}>Acceso y Registro</Heading>
                 <Text type="supporting">
-                  Verificación biométrica y cumplimiento de seguridad
+                  Administración del sistema o registro biométrico inicial
                 </Text>
               </VStack>
             </HStack>
@@ -145,7 +162,7 @@ export function App() {
                   <TextInput
                     isRequired
                     label="Nombre completo"
-                    placeholder="Ej. Marcos de Páz"
+                    placeholder="Ej. Emily Morales"
                     value={fullName}
                     onChange={setFullName}
                     width="100%"
@@ -206,7 +223,7 @@ export function App() {
                 <Button
                   isDisabled={passwordsMismatch}
                   isLoading={submitting}
-                  label={isRegister ? "Crear cuenta e ingresar" : "Iniciar sesión"}
+                  label={isRegister ? "Crear cuenta y registrar rostro" : "Iniciar sesión"}
                   size="lg"
                   type="submit"
                   variant="primary"
@@ -222,7 +239,7 @@ export function App() {
 
   return (
     <div style={{ backgroundColor: "var(--color-background-body)" }} className="min-h-screen">
-      {user.role === "admin" && activeView === "admin" ? (
+      {user?.role === "admin" && activeView === "admin" ? (
         <AdminDashboard
           user={user}
           onLogout={handleLogout}
@@ -231,8 +248,13 @@ export function App() {
       ) : (
         <CameraScanner
           user={user}
+          onOpenAuth={() => {
+            setAuthMode("login");
+            setShowAuthScreen(true);
+          }}
           onLogout={handleLogout}
-          onSwitchToAdmin={user.role === "admin" ? () => setActiveView("admin") : undefined}
+          onUserUpdated={(updated) => setUser(updated)}
+          onSwitchToAdmin={user?.role === "admin" ? () => setActiveView("admin") : undefined}
         />
       )}
     </div>

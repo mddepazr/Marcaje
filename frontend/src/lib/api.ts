@@ -1,18 +1,13 @@
-export const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8005/api/v1";
+const BASE_URL = import.meta.env.VITE_API_URL || "/api/v1";
 
 export interface User {
   id: number;
   full_name: string;
   email: string;
-  role: "employee" | "admin" | string;
+  role: "employee" | "admin";
   job_title: string;
+  has_face_enrolled: boolean;
   is_active: boolean;
-}
-
-export interface JobRole {
-  id: number;
-  name: string;
-  is_admin: boolean;
 }
 
 export interface WorkZone {
@@ -25,6 +20,11 @@ export interface WorkZone {
   require_vest: boolean;
   min_confidence: number;
   is_active: boolean;
+}
+
+export interface KioskConfig {
+  active_zone_id: number | null;
+  active_zone: WorkZone | null;
 }
 
 export interface BiometricProfile {
@@ -42,8 +42,8 @@ export interface MarcajeRecord {
   user_full_name: string;
   zone_id?: number | null;
   zone_name: string;
-  event_type: "ENTRY" | "EXIT" | string;
-  recognition_method: string;
+  event_type: "ENTRY" | "EXIT";
+  recognition_method: "session" | "face_biometric";
   face_similarity?: number | null;
   person_detected: boolean;
   is_live_person: boolean;
@@ -53,16 +53,9 @@ export interface MarcajeRecord {
   has_vest: boolean;
   is_compliant: boolean;
   confidence: number;
+  detections_raw: { label: string; confidence: number }[];
   missing_items?: string[];
   created_at: string;
-}
-
-export interface MarcajeSettings {
-  zone_name: string;
-  require_helmet: boolean;
-  require_glasses: boolean;
-  require_mask: boolean;
-  min_confidence: number;
 }
 
 export interface AdminAttendanceRecord {
@@ -71,8 +64,8 @@ export interface AdminAttendanceRecord {
   user_full_name: string;
   user_email: string;
   zone_name: string;
-  event_type: "ENTRY" | "EXIT" | string;
-  recognition_method: string;
+  event_type: "ENTRY" | "EXIT";
+  recognition_method: "session" | "face_biometric";
   face_similarity?: number | null;
   person_detected: boolean;
   is_live_person: boolean;
@@ -99,12 +92,18 @@ export interface AdminUserItem {
   id: number;
   full_name: string;
   email: string;
-  role: string;
+  role: "employee" | "admin";
   job_title: string;
   employee_code?: string | null;
   has_face_enrolled: boolean;
   is_active: boolean;
   created_at: string;
+}
+
+export interface JobRole {
+  id: number;
+  name: string;
+  is_admin: boolean;
 }
 
 export interface ScanRequestMeta {
@@ -113,9 +112,7 @@ export interface ScanRequestMeta {
   recognizedUserId?: number;
   faceSimilarity?: number;
   clientLivenessVerified?: boolean;
-  /** Caja del rostro (x, y, ancho, alto) en píxeles del fotograma enviado. */
   faceBox?: { x: number; y: number; width: number; height: number };
-  /** Zona del puente nasal entre los ojos, para confirmar lentes. */
   bridgeBox?: { x: number; y: number; width: number; height: number };
 }
 
@@ -123,26 +120,36 @@ async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 6
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  let response: Response;
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    response = await fetch(`${BASE_URL}${path}`, {
       ...options,
       credentials: "include",
       signal: controller.signal,
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: "Error en el servidor" }));
-      throw new Error(err.detail || `Error HTTP ${res.status}`);
-    }
-    return res.json();
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("El servidor tardó demasiado en responder. Intenta de nuevo.");
+      throw new Error(
+        "El servidor tardó demasiado en responder (posible arranque en frío). Intenta de nuevo en unos segundos."
+      );
     }
-    throw err;
+    throw new Error("Error de conexión con el servidor. Verifica tu red.");
   } finally {
     clearTimeout(timer);
   }
+
+  if (!response.ok) {
+    let detail = "Error en la solicitud";
+    try {
+      const data = await response.json();
+      detail = data.detail || detail;
+    } catch {
+      detail = response.statusText || detail;
+    }
+    throw new Error(detail);
+  }
+
+  return response.json();
 }
 
 export const api = {
@@ -162,45 +169,11 @@ export const api = {
 
   logout: () => request<{ message: string }>("/auth/logout", { method: "POST" }),
 
-  me: () => request<User>("/auth/me", {}, 65000),
+  me: () => request<User>("/auth/me", {}, 15000),
 
   getZones: () => request<WorkZone[]>("/marcaje/zones"),
 
-  getAdminZones: () => request<WorkZone[]>("/admin/zones"),
-
-  createWorkZone: (data: {
-    name: string;
-    description: string;
-    require_helmet: boolean;
-    require_glasses: boolean;
-    require_mask: boolean;
-    require_vest: boolean;
-    min_confidence: number;
-  }) =>
-    request<WorkZone>("/admin/zones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    }),
-
-  updateWorkZone: (
-    zoneId: number,
-    data: Partial<{
-      name: string;
-      description: string;
-      require_helmet: boolean;
-      require_glasses: boolean;
-      require_mask: boolean;
-      require_vest: boolean;
-      min_confidence: number;
-      is_active: boolean;
-    }>
-  ) =>
-    request<WorkZone>(`/admin/zones/${zoneId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    }),
+  getKioskConfig: () => request<KioskConfig>("/marcaje/kiosk-config"),
 
   getBiometricDirectory: () => request<BiometricProfile[]>("/marcaje/biometric-directory"),
 
@@ -216,28 +189,10 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  getSettings: () => request<MarcajeSettings>("/admin/settings"),
-
-  updateSettings: (data: MarcajeSettings) =>
-    request<MarcajeSettings>("/admin/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    }),
-
-  getJobRoles: () => request<JobRole[]>("/admin/roles"),
-
-  createJobRole: (data: { name: string; is_admin: boolean }) =>
-    request<JobRole>("/admin/roles", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    }),
-
-  scanFrames: (blobs: Blob[], mode: "live" | "upload" = "live", meta?: ScanRequestMeta) => {
+  scanFrames: (files: Blob[], mode: "live" | "upload" = "live", meta?: ScanRequestMeta) => {
     const formData = new FormData();
-    blobs.forEach((blob, idx) => {
-      formData.append("files", blob, `frame_${idx}.jpg`);
+    files.forEach((blob, idx) => {
+      formData.append("files", blob, `frame_${idx + 1}.jpg`);
     });
     formData.append("mode", mode);
     if (meta?.zoneId !== undefined) formData.append("zone_id", String(meta.zoneId));
@@ -265,24 +220,58 @@ export const api = {
         method: "POST",
         body: formData,
       },
-      35000
+      120000
     );
   },
 
-  getHistory: (kiosk = true) => request<MarcajeRecord[]>(`/marcaje/history?kiosk=${kiosk}`),
+  getHistory: () => request<MarcajeRecord[]>("/marcaje/history"),
 
   getAdminStats: () => request<AdminStats>("/admin/stats"),
 
-  getAdminRecords: (statusFilter = "all", search = "") => {
+  getAdminZones: () => request<WorkZone[]>("/admin/zones"),
+
+  setAdminKioskZone: (active_zone_id: number) =>
+    request<WorkZone>("/admin/kiosk-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active_zone_id }),
+    }),
+
+  createWorkZone: (data: Omit<WorkZone, "id" | "is_active">) =>
+    request<WorkZone>("/admin/zones", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+
+  updateWorkZone: (id: number, data: Partial<WorkZone>) =>
+    request<WorkZone>(`/admin/zones/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+
+  getAdminRecords: (
+    statusFilter = "all",
+    search = "",
+    zoneName = "",
+    userId?: number
+  ) => {
     const params = new URLSearchParams({ status_filter: statusFilter, search });
+    if (zoneName) params.set("zone_name", zoneName);
+    if (userId !== undefined) params.set("user_id", String(userId));
     return request<AdminAttendanceRecord[]>(`/admin/records?${params.toString()}`);
   },
+
+  exportCsvUrl: `${BASE_URL}/admin/records/export`,
+
+  evidenceUrl: (recordId: number) => `${BASE_URL}/admin/evidence/${recordId}`,
 
   getAdminUsers: () => request<AdminUserItem[]>("/admin/users"),
 
   updateAdminUser: (
     userId: number,
-    data: { job_title?: string; role?: string; employee_code?: string; is_active?: boolean }
+    data: { job_title?: string; role?: "employee" | "admin"; is_active?: boolean; employee_code?: string }
   ) =>
     request<AdminUserItem>(`/admin/users/${userId}`, {
       method: "PATCH",
@@ -290,6 +279,12 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  exportCsvUrl: `${API_BASE}/admin/records/export`,
-  evidenceUrl: (recordId: number) => `${API_BASE}/admin/evidence/${recordId}`,
+  getJobRoles: () => request<JobRole[]>("/admin/roles"),
+
+  createJobRole: (data: { name: string; is_admin: boolean }) =>
+    request<JobRole>("/admin/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
 };

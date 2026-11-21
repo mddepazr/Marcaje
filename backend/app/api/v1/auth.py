@@ -34,9 +34,21 @@ class UserOut(BaseModel):
     email: str
     role: str
     job_title: str
+    has_face_enrolled: bool = False
     is_active: bool
 
-    model_config = {"from_attributes": True}
+
+def serialize_user(user: User) -> UserOut:
+    enrolled = isinstance(user.face_descriptor, list) and len(user.face_descriptor) == 128
+    return UserOut(
+        id=user.id,
+        full_name=user.full_name,
+        email=user.email,
+        role=user.role,
+        job_title=user.job_title,
+        has_face_enrolled=enrolled,
+        is_active=user.is_active,
+    )
 
 
 def _create_token(user_id: int) -> str:
@@ -55,6 +67,23 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         max_age=TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
+
+
+def get_optional_user(
+    access_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db),
+) -> User | None:
+    if not access_token:
+        return None
+    try:
+        payload = jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = int(payload.get("sub", 0))
+    except Exception:
+        return None
+    user = db.get(User, user_id)
+    if not user or not user.is_active:
+        return None
+    return user
 
 
 def get_current_user(
@@ -97,7 +126,7 @@ def register(payload: RegisterIn, response: Response, db: Session = Depends(get_
     db.refresh(user)
 
     _set_auth_cookie(response, _create_token(user.id))
-    return user
+    return serialize_user(user)
 
 
 @router.post("/login", response_model=UserOut)
@@ -111,7 +140,7 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tu cuenta está desactivada.")
 
     _set_auth_cookie(response, _create_token(user.id))
-    return user
+    return serialize_user(user)
 
 
 @router.post("/logout")
@@ -128,4 +157,4 @@ def logout(response: Response):
 
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
-    return current_user
+    return serialize_user(current_user)

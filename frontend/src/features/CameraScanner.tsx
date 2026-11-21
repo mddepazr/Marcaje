@@ -5,9 +5,9 @@ import {
   Clock,
   Glasses,
   HardHat,
-  History,
   Image as ImageIcon,
   LayoutDashboard,
+  Lock,
   LogIn,
   LogOut,
   MapPin,
@@ -59,8 +59,10 @@ import { Toast, ToastData } from "../components/ui/Toast";
 import { ThemeSwitcher } from "../components/ui/ThemeSwitcher";
 
 interface Props {
-  user: User;
+  user: User | null;
+  onOpenAuth: () => void;
   onLogout: () => void;
+  onUserUpdated?: (user: User) => void;
   onSwitchToAdmin?: () => void;
 }
 
@@ -75,15 +77,18 @@ type KioskStage =
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Fotogramas seguidos que deben coincidir con la MISMA persona antes de identificarla. */
-const REQUIRED_MATCH_FRAMES = 3;
-/** Fotogramas seguidos sin coincidencia antes de declarar "rostro no reconocido". */
-const UNKNOWN_FRAMES_BEFORE_REJECT = 3;
-/** Muestras faciales que se guardan al enrolar desde cámara. */
+const REQUIRED_MATCH_FRAMES = 2;
+const UNKNOWN_FRAMES_BEFORE_REJECT = 5;
 const ENROLL_TARGET_SAMPLES = 5;
 const ENROLL_MIN_SAMPLES = 3;
 
-export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
+export function CameraScanner({
+  user,
+  onOpenAuth,
+  onLogout,
+  onUserUpdated,
+  onSwitchToAdmin,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const enrollVideoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -112,22 +117,20 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [scanError, setScanError] = useState("");
   const [lastResult, setLastResult] = useState<MarcajeRecord | null>(null);
-  const [history, setHistory] = useState<MarcajeRecord[]>([]);
   const [toast, setToast] = useState<ToastData | null>(null);
   const [clockText, setClockText] = useState(() =>
     new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   );
 
-  // Modal de Enrolamiento Facial
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [enrollMode, setEnrollMode] = useState<"camera" | "photo">("camera");
-  const [enrollTargetUserId, setEnrollTargetUserId] = useState<number>(user.id);
+  const [enrollTargetUserId, setEnrollTargetUserId] = useState<number>(user?.id ?? 0);
   const [enrollCode, setEnrollCode] = useState("");
   const [enrollPhotoFile, setEnrollPhotoFile] = useState<File | null>(null);
   const [enrollPhotoPreview, setEnrollPhotoPreview] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
+  const [justEnrolledSelf, setJustEnrolledSelf] = useState(false);
 
-  // Refs para bucle continuo
   const stageRef = useRef<KioskStage>("LOADING_MODELS");
   const blinkCountRef = useRef(0);
   const baselineEarRef = useRef<number | null>(null);
@@ -141,24 +144,25 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
   stageRef.current = stage;
 
+  const isAdmin = user?.role === "admin";
+  const needsInitialEnrollment = Boolean(user && !user.has_face_enrolled);
   const activeZone = zones.find((z) => z.id === selectedZoneId) || zones[0] || null;
   const requiresTwoPhase = Boolean(activeZone && (activeZone.require_mask || activeZone.require_glasses));
 
   const loadData = async () => {
     try {
-      const [zonesRes, dirRes, histRes] = await Promise.all([
+      const [zonesRes, kioskCfg, dirRes] = await Promise.all([
         api.getZones(),
+        api.getKioskConfig().catch(() => ({ active_zone_id: null, active_zone: null })),
         api.getBiometricDirectory(),
-        api.getHistory(true),
       ]);
       setZones(zonesRes);
-      if (zonesRes.length > 0 && selectedZoneId === null) {
-        setSelectedZoneId(zonesRes[0].id);
+      if (selectedZoneId === null) {
+        setSelectedZoneId(kioskCfg.active_zone_id ?? zonesRes[0]?.id ?? null);
       }
       setBiometricDir(dirRes);
-      setHistory(histRes);
 
-      if (user.role === "admin") {
+      if (user?.role === "admin") {
         const usersList = await api.getAdminUsers().catch(() => []);
         setAllUsers(usersList);
       }
@@ -196,6 +200,18 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
   }, []);
 
   useEffect(() => {
+    if (user) {
+      setEnrollTargetUserId(user.id);
+      if (!user.has_face_enrolled) {
+        setEnrollMode("camera");
+        setEnrollOpen(true);
+      }
+    } else {
+      setJustEnrolledSelf(false);
+    }
+  }, [user?.id, user?.has_face_enrolled]);
+
+  useEffect(() => {
     loadData();
     let stream: MediaStream | null = null;
 
@@ -231,7 +247,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
       stream?.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     };
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     if (enrollOpen && enrollMode === "camera" && enrollVideoRef.current && mediaStreamRef.current) {
@@ -321,7 +337,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           return;
         }
 
-        const needsDesc = blinkCountRef.current >= 1 || faceFramesCountRef.current >= 4;
+        const needsDesc = blinkCountRef.current >= 1 || faceFramesCountRef.current >= 3;
         const res = await analyzeVideoFaces(videoRef.current, true, needsDesc);
         if (cancelled) return;
 
@@ -350,7 +366,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           baselineEarRef.current = baselineEarRef.current * 0.8 + ear * 0.2;
         }
 
-        const blinkThreshold = Math.min(0.23, (baselineEarRef.current || 0.29) * 0.82);
+        const blinkThreshold = Math.min(0.24, (baselineEarRef.current || 0.29) * 0.83);
         if (ear < blinkThreshold && !eyeClosedRef.current) {
           eyeClosedRef.current = true;
         } else if (ear >= blinkThreshold + 0.015 && eyeClosedRef.current) {
@@ -358,7 +374,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           blinkCountRef.current = Math.min(2, blinkCountRef.current + 1);
         }
 
-        if (blinkCountRef.current < 2 && faceFramesCountRef.current >= 5) {
+        if (blinkCountRef.current < 2 && faceFramesCountRef.current >= 4) {
           blinkCountRef.current = 2;
         }
 
@@ -371,14 +387,12 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
         if (biometricDir.length === 0) {
           setPillTone("amber");
-          setStatusPill("Sin perfiles faciales · Usa 'Enrolar Rostro'");
+          setStatusPill("Sin perfiles faciales · Crea tu cuenta para registrar rostro");
           return;
         }
 
-        // Esperar a un fotograma con descriptor calculado (SSD + landmarks).
         if (descriptor.length !== 128) return;
 
-        // Solo comparar rostros nítidos, cercanos y de frente.
         if (!res.primaryFace.quality.ok) {
           matchStreakRef.current = { id: null, distances: [] };
           setPillTone("amber");
@@ -392,7 +406,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           unknownFramesRef.current += 1;
           if (unknownFramesRef.current >= UNKNOWN_FRAMES_BEFORE_REJECT) {
             setPillTone("red");
-            setStatusPill("Rostro no reconocido");
+            setStatusPill("Rostro no reconocido · Regístrate en 'Admin / Registro'");
             blinkCountRef.current = 0;
             faceFramesCountRef.current = 0;
             unknownFramesRef.current = 0;
@@ -404,7 +418,6 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
         }
         unknownFramesRef.current = 0;
 
-        // Votación temporal: varios fotogramas seguidos deben apuntar a la misma persona.
         const streak = matchStreakRef.current;
         if (streak.id === match.profile.id) {
           streak.distances.push(match.distance);
@@ -446,7 +459,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
       }
     };
 
-    const interval = setInterval(tick, 420);
+    const interval = setInterval(tick, 400);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -472,16 +485,11 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
   const handleMarkAttendance = async (eventType: "ENTRY" | "EXIT") => {
     if (!cameraReady) return;
 
-    if (
-      eventType === "ENTRY" &&
-      biometricDir.length > 0 &&
-      !identifiedProfile &&
-      modelsReady
-    ) {
+    if (!identifiedProfile && !user && modelsReady) {
       setToast({
         type: "error",
         title: "Identificación requerida",
-        message: "Primero mira a la cámara sin mascarilla para validar tu identidad.",
+        message: "Mira a la cámara sin mascarilla para que el sistema reconozca tu rostro.",
       });
       return;
     }
@@ -493,8 +501,6 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
     setStatusPill("Analizando EPP y registrando...");
 
     try {
-      // Ubicación actual del rostro: el servidor la usa para validar que los lentes,
-      // la mascarilla y el casco estén realmente sobre la cara y no en otra parte.
       let faceBox: Box | undefined;
       let bridgeBox: Box | undefined;
       if (modelsReady && videoRef.current) {
@@ -566,6 +572,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
 
   const handleEnrollFaceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setEnrolling(true);
 
     try {
@@ -597,7 +604,7 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
               lastQualityIssue = res.primaryFace.quality.reason || "";
             }
           }
-          await sleep(250);
+          await sleep(220);
         }
 
         if (collected.length < ENROLL_MIN_SAMPLES) {
@@ -616,12 +623,18 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
         samplesToSave = collected;
       }
 
+      const targetId = user.role === "admin" ? enrollTargetUserId : user.id;
       const saved = await api.enrollFace({
-        user_id: user.role === "admin" ? enrollTargetUserId : user.id,
+        user_id: targetId,
         employee_code: enrollCode.trim() || undefined,
         face_descriptor: descriptorToSave,
         face_samples: samplesToSave,
       });
+
+      if (targetId === user.id) {
+        onUserUpdated?.({ ...user, has_face_enrolled: true });
+        setJustEnrolledSelf(true);
+      }
 
       await loadData();
       closeEnrollModal();
@@ -709,7 +722,10 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
   }));
 
   return (
-    <div style={{ backgroundColor: "var(--color-background-body)" }} className="min-h-screen">
+    <div
+      style={{ backgroundColor: "var(--color-background-body)" }}
+      className="flex min-h-screen flex-col"
+    >
       <header
         style={{
           backgroundColor: "var(--color-background-surface)",
@@ -732,8 +748,13 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
               <VStack gap={0.5}>
                 <Heading level={3}>Terminal Biométrica EPP</Heading>
                 <Text type="supporting">
-                  {user.full_name} · {biometricDir.length}{" "}
-                  {biometricDir.length === 1 ? "rostro" : "rostros"}
+                  {user
+                    ? `Sesión: ${user.full_name} · ${biometricDir.length} ${
+                        biometricDir.length === 1 ? "rostro" : "rostros"
+                      }`
+                    : `Modo Quiosco Activo · ${biometricDir.length} ${
+                        biometricDir.length === 1 ? "colaborador registrado" : "colaboradores registrados"
+                      }`}
                 </Text>
               </VStack>
             </HStack>
@@ -752,57 +773,106 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
           <div className="flex flex-wrap items-center justify-between gap-2.5 lg:justify-end">
             <ThemeSwitcher />
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                label="Enrolar Rostro"
-                variant="secondary"
-                size="sm"
-                icon={<UserPlus className="h-3.5 w-3.5" />}
-                onClick={() => {
-                  setEnrollMode("camera");
-                  setEnrollOpen(true);
-                }}
-              />
-              {user.role === "admin" && onSwitchToAdmin && (
+            {user ? (
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
-                  label="Panel Admin"
+                  label="Enrolar Rostro"
                   variant="secondary"
                   size="sm"
-                  icon={<LayoutDashboard className="h-3.5 w-3.5" />}
-                  onClick={onSwitchToAdmin}
+                  icon={<UserPlus className="h-3.5 w-3.5" />}
+                  onClick={() => {
+                    setEnrollTargetUserId(user.id);
+                    setEnrollMode("camera");
+                    setEnrollOpen(true);
+                  }}
                 />
-              )}
+                {isAdmin && onSwitchToAdmin && (
+                  <Button
+                    label="Panel Admin"
+                    variant="secondary"
+                    size="sm"
+                    icon={<LayoutDashboard className="h-3.5 w-3.5" />}
+                    onClick={onSwitchToAdmin}
+                  />
+                )}
+                <Button
+                  label="Dejar Quiosco Libre"
+                  variant="ghost"
+                  size="sm"
+                  icon={<LogOut className="h-3.5 w-3.5" />}
+                  onClick={onLogout}
+                />
+              </div>
+            ) : (
               <Button
-                label="Salir"
+                label="Admin / Registro"
                 variant="ghost"
                 size="sm"
-                icon={<LogOut className="h-3.5 w-3.5" />}
-                onClick={onLogout}
+                icon={<Lock className="h-3.5 w-3.5" />}
+                onClick={onOpenAuth}
               />
-            </div>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
+        {needsInitialEnrollment && (
+          <div className="mb-5">
+            <Banner
+              status="warning"
+              title="Registro biométrico inicial requerido"
+              description="Como es tu primera vez en el sistema, registra tu rostro ahora para que en tus próximos turnos puedas marcar automáticamente sin iniciar sesión."
+            />
+          </div>
+        )}
+
+        {justEnrolledSelf && user && !isAdmin && (
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1">
+              <Banner
+                status="success"
+                title="Rostro guardado correctamente"
+                description="Ya puedes probar tu marcaje aquí mismo o cerrar tu sesión para dejar la terminal lista para el personal."
+              />
+            </div>
+            <Button
+              label="Finalizar y volver a Quiosco"
+              variant="primary"
+              size="sm"
+              onClick={onLogout}
+            />
+          </div>
+        )}
+
         <div className="grid gap-6 lg:grid-cols-12 lg:gap-8">
           <div className="lg:col-span-7">
             <Card padding={5}>
               <VStack gap={5}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div className="flex-1">
-                    <Selector
-                      label="Área operativa"
-                      size="md"
-                      width="100%"
-                      startIcon={<MapPin className="h-4 w-4" />}
-                      options={zoneOptions}
-                      value={selectedZoneId !== null ? String(selectedZoneId) : undefined}
-                      onChange={(val) => {
-                        setSelectedZoneId(Number(val));
-                        resetBiometricCycle();
-                      }}
-                    />
+                    {isAdmin ? (
+                      <Selector
+                        label="Área operativa (vista Admin)"
+                        size="md"
+                        width="100%"
+                        startIcon={<MapPin className="h-4 w-4" />}
+                        options={zoneOptions}
+                        value={selectedZoneId !== null ? String(selectedZoneId) : undefined}
+                        onChange={(val) => {
+                          setSelectedZoneId(Number(val));
+                          resetBiometricCycle();
+                        }}
+                      />
+                    ) : (
+                      <VStack gap={1}>
+                        <Text type="supporting">Área configurada en esta terminal</Text>
+                        <HStack gap={2} vAlign="center">
+                          <MapPin className="h-4 w-4 shrink-0" />
+                          <Heading level={3}>{activeZone?.name || "Planta General"}</Heading>
+                        </HStack>
+                      </VStack>
+                    )}
                   </div>
                   <div className="shrink-0">
                     <Badge
@@ -953,7 +1023,16 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
                     onClick={() => resetBiometricCycle()}
                   />
 
-                  <div>
+                  <div className="flex items-center gap-2">
+                    {!user && (
+                      <Button
+                        label="Primera vez · Registrarme"
+                        variant="ghost"
+                        size="sm"
+                        icon={<UserPlus className="h-3.5 w-3.5" />}
+                        onClick={onOpenAuth}
+                      />
+                    )}
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -1105,296 +1184,166 @@ export function CameraScanner({ user, onLogout, onSwitchToAdmin }: Props) {
             </Card>
           </div>
         </div>
-
-        <section className="mt-8">
-          <Card padding={5}>
-            <VStack gap={4}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <HStack gap={2} vAlign="center">
-                  <History className="h-4 w-4" />
-                  <Heading level={3}>Bitácora Reciente de Terminal</Heading>
-                </HStack>
-                <Badge label={`${history.length} registros`} variant="neutral" />
-              </div>
-
-              {history.length === 0 ? (
-                <div className="py-6 text-center">
-                  <Text type="supporting">Aún no hay marcajes registrados.</Text>
-                </div>
-              ) : (
-                <>
-                  <div className="flex flex-col gap-3 md:hidden">
-                    {history.map((item) => {
-                      const detectedTags = [
-                        item.has_helmet ? "Casco" : null,
-                        item.has_glasses ? "Lentes" : null,
-                        item.has_mask ? "Mascarilla" : null,
-                        item.has_vest ? "Chaleco" : null,
-                      ].filter(Boolean);
-
-                      return (
-                        <div
-                          key={item.id}
-                          style={{
-                            backgroundColor: "var(--color-background-muted)",
-                            borderColor: "var(--color-border-subtle)",
-                          }}
-                          className="rounded-xl border p-3.5"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <VStack gap={0.5}>
-                              <Text type="label">{item.user_full_name}</Text>
-                              <Text type="supporting">
-                                {item.zone_name} ·{" "}
-                                {new Date(item.created_at).toLocaleString([], {
-                                  day: "2-digit",
-                                  month: "2-digit",
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </Text>
-                            </VStack>
-                            <Badge
-                              variant={item.is_compliant ? "success" : "error"}
-                              label={item.is_compliant ? "Aprobado" : "Rechazado"}
-                            />
-                          </div>
-
-                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                            <Badge
-                              variant={item.event_type === "EXIT" ? "orange" : "blue"}
-                              label={item.event_type === "EXIT" ? "Salida" : "Entrada"}
-                            />
-                            <Text type="supporting">
-                              EPP: {detectedTags.length > 0 ? detectedTags.join(", ") : "Ninguno"}
-                            </Text>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="hidden overflow-x-auto md:block">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr
-                          style={{ borderColor: "var(--color-border-subtle)" }}
-                          className="border-b uppercase"
-                        >
-                          <th className="py-2.5 pr-3">
-                            <Text type="supporting">Fecha / Hora</Text>
-                          </th>
-                          <th className="py-2.5 px-3">
-                            <Text type="supporting">Colaborador</Text>
-                          </th>
-                          <th className="py-2.5 px-3">
-                            <Text type="supporting">Área</Text>
-                          </th>
-                          <th className="py-2.5 px-3">
-                            <Text type="supporting">Tipo</Text>
-                          </th>
-                          <th className="py-2.5 px-3">
-                            <Text type="supporting">Resultado</Text>
-                          </th>
-                          <th className="py-2.5 pl-3 text-right">
-                            <Text type="supporting">EPP Detectado</Text>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody
-                        style={{ borderColor: "var(--color-border-subtle)" }}
-                        className="divide-y"
-                      >
-                        {history.map((item) => {
-                          const detectedTags = [
-                            item.has_helmet ? "Casco" : null,
-                            item.has_glasses ? "Lentes" : null,
-                            item.has_mask ? "Mascarilla" : null,
-                            item.has_vest ? "Chaleco" : null,
-                          ].filter(Boolean);
-
-                          return (
-                            <tr key={item.id}>
-                              <td className="whitespace-nowrap py-3 pr-3">
-                                <Text hasTabularNumbers type="supporting">
-                                  {new Date(item.created_at).toLocaleString([], {
-                                    day: "2-digit",
-                                    month: "2-digit",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })}
-                                </Text>
-                              </td>
-                              <td className="py-3 px-3">
-                                <Text type="label">{item.user_full_name}</Text>
-                              </td>
-                              <td className="py-3 px-3">
-                                <Text type="supporting">{item.zone_name}</Text>
-                              </td>
-                              <td className="py-3 px-3">
-                                <Badge
-                                  variant={item.event_type === "EXIT" ? "orange" : "blue"}
-                                  label={item.event_type === "EXIT" ? "Salida" : "Entrada"}
-                                />
-                              </td>
-                              <td className="py-3 px-3">
-                                <Badge
-                                  variant={item.is_compliant ? "success" : "error"}
-                                  label={item.is_compliant ? "Aprobado" : "Rechazado"}
-                                />
-                              </td>
-                              <td className="py-3 pl-3 text-right">
-                                <Text type="supporting">
-                                  {detectedTags.length > 0 ? detectedTags.join(" · ") : "Ninguno"}
-                                </Text>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-            </VStack>
-          </Card>
-        </section>
       </main>
 
-      <Dialog
-        isOpen={enrollOpen}
-        onOpenChange={(isOpen) => {
-          if (!isOpen && !enrolling) closeEnrollModal();
-        }}
-        width={480}
-        purpose="form"
+      <footer
+        style={{ borderColor: "var(--color-border-subtle)" }}
+        className="border-t px-4 py-3 text-center"
       >
-        <form onSubmit={handleEnrollFaceSubmit}>
-          <VStack gap={4}>
-            <DialogHeader
-              onOpenChange={(isOpen) => {
-                if (!isOpen && !enrolling) closeEnrollModal();
-              }}
-              subtitle="Captura el rostro descubierto para reconocimiento facial automático"
-              title="Registrar Perfil Biométrico"
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
+          <Text type="supporting">Control de Marcaje EPP · Verificación Biométrica Industrial</Text>
+          {!user && (
+            <Button
+              label="Acceso Administrador / Crear Perfil"
+              variant="ghost"
+              size="sm"
+              icon={<Lock className="h-3 w-3" />}
+              onClick={onOpenAuth}
             />
+          )}
+        </div>
+      </footer>
 
-            <SegmentedControl
-              label="Método de captura biométrica"
-              layout="fill"
-              value={enrollMode}
-              onChange={(val) => setEnrollMode(val as "camera" | "photo")}
-            >
-              <SegmentedControlItem
-                value="camera"
-                label="Cámara en vivo"
-                icon={<Camera className="h-3.5 w-3.5" />}
+      {user && (
+        <Dialog
+          isOpen={enrollOpen}
+          onOpenChange={(isOpen) => {
+            if (!isOpen && !enrolling) closeEnrollModal();
+          }}
+          width={480}
+          purpose="form"
+        >
+          <form onSubmit={handleEnrollFaceSubmit}>
+            <VStack gap={4}>
+              <DialogHeader
+                onOpenChange={(isOpen) => {
+                  if (!isOpen && !enrolling) closeEnrollModal();
+                }}
+                subtitle={
+                  needsInitialEnrollment
+                    ? `Hola ${user.full_name}, captura tu rostro una sola vez para completar tu registro`
+                    : "Captura el rostro descubierto para reconocimiento facial automático"
+                }
+                title="Registrar Perfil Biométrico"
               />
-              <SegmentedControlItem
-                value="photo"
-                label="Desde fotografía"
-                icon={<ImageIcon className="h-3.5 w-3.5" />}
-              />
-            </SegmentedControl>
 
-            {enrollMode === "camera" ? (
-              <div
-                style={{ borderColor: "var(--color-border-subtle)" }}
-                className="relative mx-auto aspect-[4/3] w-full overflow-hidden rounded-2xl border bg-black"
+              <SegmentedControl
+                label="Método de captura biométrica"
+                layout="fill"
+                value={enrollMode}
+                onChange={(val) => setEnrollMode(val as "camera" | "photo")}
               >
-                <video
-                  ref={enrollVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="h-full w-full -scale-x-100 object-cover"
+                <SegmentedControlItem
+                  value="camera"
+                  label="Cámara en vivo"
+                  icon={<Camera className="h-3.5 w-3.5" />}
                 />
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="h-36 w-28 rounded-full border-2 border-dashed border-emerald-400/80" />
-                </div>
-                <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-white/90">
-                  Rostro descubierto, de frente y quieto ~4 s al guardar
-                </div>
-              </div>
-            ) : (
-              <div>
-                <input
-                  ref={enrollPhotoInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] || null;
-                    setEnrollPhotoFile(f);
-                    if (enrollPhotoPreview) URL.revokeObjectURL(enrollPhotoPreview);
-                    setEnrollPhotoPreview(f ? URL.createObjectURL(f) : null);
-                  }}
-                  className="hidden"
+                <SegmentedControlItem
+                  value="photo"
+                  label="Desde fotografía"
+                  icon={<ImageIcon className="h-3.5 w-3.5" />}
                 />
-                <button
-                  type="button"
-                  onClick={() => enrollPhotoInputRef.current?.click()}
-                  style={{
-                    backgroundColor: "var(--color-background-muted)",
-                    borderColor: "var(--color-border-subtle)",
-                  }}
-                  className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed p-5 text-center transition hover:opacity-90"
+              </SegmentedControl>
+
+              {enrollMode === "camera" ? (
+                <div
+                  style={{ borderColor: "var(--color-border-subtle)" }}
+                  className="relative mx-auto aspect-[4/3] w-full overflow-hidden rounded-2xl border bg-black"
                 >
-                  {enrollPhotoPreview ? (
-                    <img
-                      src={enrollPhotoPreview}
-                      alt="Vista previa rostro"
-                      className="h-32 w-32 rounded-2xl object-cover"
-                    />
-                  ) : (
-                    <VStack gap={1.5} hAlign="center">
-                      <Upload className="h-6 w-6" />
-                      <Text type="label">Seleccionar foto frontal del colaborador</Text>
-                      <Text type="supporting">
-                        JPG, PNG o WEBP · Sin mascarilla ni lentes oscuros
-                      </Text>
-                    </VStack>
-                  )}
-                </button>
-              </div>
-            )}
+                  <video
+                    ref={enrollVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="h-full w-full -scale-x-100 object-cover"
+                  />
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="h-36 w-28 rounded-full border-2 border-dashed border-emerald-400/80" />
+                  </div>
+                  <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-white/90">
+                    Rostro descubierto, de frente y quieto ~3 s al guardar
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    ref={enrollPhotoInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      setEnrollPhotoFile(f);
+                      if (enrollPhotoPreview) URL.revokeObjectURL(enrollPhotoPreview);
+                      setEnrollPhotoPreview(f ? URL.createObjectURL(f) : null);
+                    }}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => enrollPhotoInputRef.current?.click()}
+                    style={{
+                      backgroundColor: "var(--color-background-muted)",
+                      borderColor: "var(--color-border-subtle)",
+                    }}
+                    className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed p-5 text-center transition hover:opacity-90"
+                  >
+                    {enrollPhotoPreview ? (
+                      <img
+                        src={enrollPhotoPreview}
+                        alt="Vista previa rostro"
+                        className="h-32 w-32 rounded-2xl object-cover"
+                      />
+                    ) : (
+                      <VStack gap={1.5} hAlign="center">
+                        <Upload className="h-6 w-6" />
+                        <Text type="label">Seleccionar foto frontal del colaborador</Text>
+                        <Text type="supporting">
+                          JPG, PNG o WEBP · Sin mascarilla ni lentes oscuros
+                        </Text>
+                      </VStack>
+                    )}
+                  </button>
+                </div>
+              )}
 
-            {user.role === "admin" && allUsers.length > 0 && (
-              <Selector
-                hasSearch
-                label="Colaborador a registrar"
-                options={userOptions}
-                value={String(enrollTargetUserId)}
+              {user.role === "admin" && allUsers.length > 0 && (
+                <Selector
+                  hasSearch
+                  label="Colaborador a registrar"
+                  options={userOptions}
+                  value={String(enrollTargetUserId)}
+                  width="100%"
+                  onChange={(val) => setEnrollTargetUserId(Number(val))}
+                />
+              )}
+
+              <TextInput
+                isOptional
+                label="Código o carné de empleado"
+                placeholder="Ej. 2500587"
+                value={enrollCode}
+                onChange={setEnrollCode}
                 width="100%"
-                onChange={(val) => setEnrollTargetUserId(Number(val))}
               />
-            )}
 
-            <TextInput
-              isOptional
-              label="Código o carné de empleado"
-              placeholder="Ej. 2500587"
-              value={enrollCode}
-              onChange={setEnrollCode}
-              width="100%"
-            />
-
-            <HStack gap={2} hAlign="end">
-              <Button
-                isDisabled={enrolling}
-                label="Cancelar"
-                onClick={closeEnrollModal}
-                variant="secondary"
-              />
-              <Button
-                isLoading={enrolling}
-                label={enrolling ? "Procesando rostro..." : "Guardar Perfil"}
-                type="submit"
-                variant="primary"
-              />
-            </HStack>
-          </VStack>
-        </form>
-      </Dialog>
+              <HStack gap={2} hAlign="end">
+                <Button
+                  isDisabled={enrolling}
+                  label="Cancelar"
+                  onClick={closeEnrollModal}
+                  variant="secondary"
+                />
+                <Button
+                  isLoading={enrolling}
+                  label={enrolling ? "Procesando rostro..." : "Guardar Perfil"}
+                  type="submit"
+                  variant="primary"
+                />
+              </HStack>
+            </VStack>
+          </form>
+        </Dialog>
+      )}
 
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>

@@ -1,18 +1,9 @@
 import * as faceapi from "@vladmandic/face-api";
 import { BiometricProfile } from "./api";
 
-/**
- * Parámetros de reconocimiento facial.
- *
- * - FACE_MATCH_THRESHOLD: distancia euclidiana máxima para aceptar a alguien.
- *   El valor anterior (0.56) era muy permisivo: con pocas personas enroladas,
- *   cualquier rostro "parecido" caía dentro y se asignaba al perfil más cercano.
- * - FACE_AMBIGUITY_MARGIN: si el segundo perfil más cercano está casi a la misma
- *   distancia que el primero, no se identifica a nadie (evita confundir personas).
- */
-export const FACE_MATCH_THRESHOLD = 0.45;
-export const FACE_AMBIGUITY_MARGIN = 0.06;
-export const ENROLL_MAX_SAMPLE_SPREAD = 0.42;
+export const FACE_MATCH_THRESHOLD = 0.56;
+export const FACE_AMBIGUITY_MARGIN = 0.04;
+export const ENROLL_MAX_SAMPLE_SPREAD = 0.48;
 
 let modelsLoaded = false;
 let loadingPromise: Promise<void> | null = null;
@@ -22,8 +13,6 @@ export async function ensureFaceModelsLoaded(): Promise<void> {
   if (!loadingPromise) {
     loadingPromise = Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri("/models"),
-      // SSD MobileNet es más lento que TinyFaceDetector pero da una caja de rostro
-      // mucho más precisa, lo que produce descriptores faciales más confiables.
       faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
       faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
       faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
@@ -52,10 +41,6 @@ export interface DetectedFaceFrame {
   descriptor: number[];
   score: number;
   quality: FaceQuality;
-  /**
-   * Zona del puente de la nariz entre ambos ojos. El servidor busca ahí el
-   * puente de la montura para confirmar que realmente hay lentes puestos.
-   */
   bridgeBox?: Box;
 }
 
@@ -93,20 +78,14 @@ function computeEyeAspectRatio(eye: Point[]): number {
   return (v1 + v2) / (2.0 * h);
 }
 
-/**
- * Evalúa si un rostro sirve para comparar biometría: tamaño suficiente,
- * detección confiable y cabeza mirando de frente (sin girar ni inclinar mucho).
- * Los descriptores de rostros pequeños, borrosos o de perfil son los que más
- * generan falsos positivos.
- */
 function evaluateFaceQuality(
   box: { width: number; height: number },
   score: number,
   positions: Point[] | null,
   frameWidth: number,
-  minScore = 0.6
+  minScore = 0.45
 ): FaceQuality {
-  const minFaceWidth = Math.max(80, frameWidth * 0.1);
+  const minFaceWidth = Math.max(70, frameWidth * 0.09);
   if (box.width < minFaceWidth) {
     return { ok: false, reason: "Acércate un poco más a la cámara" };
   }
@@ -120,14 +99,14 @@ function evaluateFaceQuality(
     const eyeSpan = rightEyeOuter.x - leftEyeOuter.x;
     if (Math.abs(eyeSpan) > 1) {
       const yawRatio = (noseTip.x - leftEyeOuter.x) / eyeSpan;
-      if (yawRatio < 0.3 || yawRatio > 0.7) {
+      if (yawRatio < 0.24 || yawRatio > 0.76) {
         return { ok: false, reason: "Mira de frente a la cámara" };
       }
     }
     const rollDeg =
       (Math.atan2(rightEyeOuter.y - leftEyeOuter.y, rightEyeOuter.x - leftEyeOuter.x) * 180) /
       Math.PI;
-    if (Math.abs(rollDeg) > 20) {
+    if (Math.abs(rollDeg) > 24) {
       return { ok: false, reason: "Endereza la cabeza" };
     }
   }
@@ -151,14 +130,21 @@ export async function analyzeVideoFaces(
     return { faceCount: 0, primaryFace: null };
   }
 
-  const tinyOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.35 });
+  const tinyOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.32 });
 
   if (computeDescriptor) {
-    const ssdOptions = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, maxResults: 5 });
-    const detections = await faceapi
+    const ssdOptions = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.42, maxResults: 5 });
+    let detections = await faceapi
       .detectAllFaces(video, ssdOptions)
       .withFaceLandmarks()
       .withFaceDescriptors();
+
+    if (detections.length === 0) {
+      detections = await faceapi
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+    }
 
     if (detections.length === 0) return { faceCount: 0, primaryFace: null };
 
@@ -180,7 +166,7 @@ export async function analyzeVideoFaces(
           main.detection.score,
           main.landmarks.positions,
           video.videoWidth,
-          0.7
+          0.48
         ),
       },
     };
@@ -208,7 +194,7 @@ export async function analyzeVideoFaces(
           main.detection.score,
           main.landmarks.positions,
           video.videoWidth,
-          0.45
+          0.40
         ),
       },
     };
@@ -243,12 +229,11 @@ export async function extractDescriptorFromImageFile(file: File): Promise<number
     });
 
     let detections = await faceapi
-      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, maxResults: 5 }))
+      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.45, maxResults: 5 }))
       .withFaceLandmarks()
       .withFaceDescriptors();
 
     if (detections.length === 0) {
-      // Respaldo para fotos con poca luz donde SSD no encuentra el rostro.
       detections = await faceapi
         .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.3 }))
         .withFaceLandmarks()
@@ -268,7 +253,7 @@ export async function extractDescriptorFromImageFile(file: File): Promise<number
       main.detection.score,
       main.landmarks.positions,
       img.naturalWidth || img.width,
-      0.5
+      0.45
     );
     if (!quality.ok) {
       throw new Error(
@@ -292,7 +277,6 @@ export function descriptorDistance(a: number[], b: number[]): number {
   return Math.sqrt(sumSq);
 }
 
-/** Distancia de un descriptor a un perfil: la menor entre su promedio y sus muestras. */
 export function profileDistance(descriptor: number[], profile: BiometricProfile): number {
   let best = Number.POSITIVE_INFINITY;
   const refs: number[][] = [];
@@ -306,7 +290,7 @@ export function profileDistance(descriptor: number[], profile: BiometricProfile)
 }
 
 export function distanceToSimilarity(distance: number): number {
-  return Math.max(0, Math.min(0.999, 1 - distance * 0.8));
+  return Math.max(0, Math.min(0.999, 1 - distance * 0.72));
 }
 
 export function matchFaceDescriptor(
@@ -335,7 +319,6 @@ export function matchFaceDescriptor(
 
   if (!bestProfile || bestDistance > maxDistance) return null;
 
-  // Si dos perfiles distintos quedan casi empatados, el resultado no es confiable.
   if (Number.isFinite(secondDistance) && secondDistance - bestDistance < ambiguityMargin) {
     return null;
   }
@@ -353,7 +336,6 @@ export function averageDescriptors(vectors: number[][]): number[] {
   return avg;
 }
 
-/** Mayor distancia entre dos muestras: si es alta, las muestras no son de la misma persona o salieron mal. */
 export function maxPairwiseDistance(vectors: number[][]): number {
   let maxDist = 0;
   for (let i = 0; i < vectors.length; i++) {

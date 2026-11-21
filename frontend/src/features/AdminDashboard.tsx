@@ -16,8 +16,10 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
@@ -48,11 +50,15 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [zones, setZones] = useState<WorkZone[]>([]);
+  const [kioskZoneId, setKioskZoneId] = useState<number | null>(null);
   const [records, setRecords] = useState<AdminAttendanceRecord[]>([]);
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
 
   const [statusFilter, setStatusFilter] = useState("all");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [employeeFilter, setEmployeeFilter] = useState("all");
+  const [recordsViewMode, setRecordsViewMode] = useState<"grouped" | "table">("grouped");
   const [search, setSearch] = useState("");
   const [evidenceRecordId, setEvidenceRecordId] = useState<number | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
@@ -78,17 +84,25 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
   const [pendingStatusToggle, setPendingStatusToggle] = useState<AdminUserItem | null>(null);
   const [applyingAction, setApplyingAction] = useState(false);
 
-  const loadAll = async (filter = statusFilter, query = search) => {
+  const loadAll = async (
+    filter = statusFilter,
+    query = search,
+    zoneNameVal = zoneFilter,
+    empVal = employeeFilter
+  ) => {
     try {
-      const [statsRes, zonesRes, recRes, usersRes, rolesRes] = await Promise.all([
+      const uid = empVal !== "all" ? Number(empVal) : undefined;
+      const [statsRes, zonesRes, kioskCfg, recRes, usersRes, rolesRes] = await Promise.all([
         api.getAdminStats(),
         api.getAdminZones(),
-        api.getAdminRecords(filter, query),
+        api.getKioskConfig().catch(() => ({ active_zone_id: null, active_zone: null })),
+        api.getAdminRecords(filter, query, zoneNameVal, uid),
         api.getAdminUsers(),
         api.getJobRoles(),
       ]);
       setStats(statsRes);
       setZones(zonesRes);
+      setKioskZoneId(kioskCfg.active_zone_id ?? zonesRes.find((z) => z.is_active)?.id ?? null);
       setRecords(recRes);
       setUsers(usersRes);
       setJobRoles(rolesRes);
@@ -104,6 +118,24 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
   useEffect(() => {
     loadAll();
   }, []);
+
+  const handleSelectKioskZone = async (newZoneId: number) => {
+    try {
+      const chosen = await api.setAdminKioskZone(newZoneId);
+      setKioskZoneId(chosen.id);
+      setToast({
+        type: "success",
+        title: "Terminal actualizada",
+        message: `El quiosco ahora exige el EPP del área "${chosen.name}".`,
+      });
+    } catch (err) {
+      setToast({
+        type: "error",
+        title: "No se pudo cambiar el área del quiosco",
+        message: err instanceof Error ? err.message : "Error inesperado.",
+      });
+    }
+  };
 
   const handleToggleZoneRule = async (
     zone: WorkZone,
@@ -160,11 +192,19 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
     }
   };
 
-  const handleFilterChange = async (newFilter: string, newSearch: string) => {
+  const handleFilterChange = async (
+    newFilter: string,
+    newSearch: string,
+    newZone = zoneFilter,
+    newEmployee = employeeFilter
+  ) => {
     setStatusFilter(newFilter);
     setSearch(newSearch);
+    setZoneFilter(newZone);
+    setEmployeeFilter(newEmployee);
     try {
-      const recRes = await api.getAdminRecords(newFilter, newSearch);
+      const uid = newEmployee !== "all" ? Number(newEmployee) : undefined;
+      const recRes = await api.getAdminRecords(newFilter, newSearch, newZone, uid);
       setRecords(recRes);
     } catch {
       // Silencioso
@@ -251,6 +291,52 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
       setApplyingAction(false);
     }
   };
+
+  // Agrupación de registros por Área y luego por Empleado
+  const groupedByArea = records.reduce<
+    Record<
+      string,
+      {
+        zoneName: string;
+        total: number;
+        approved: number;
+        employees: Record<
+          number,
+          {
+            userId: number;
+            userName: string;
+            userEmail: string;
+            items: AdminAttendanceRecord[];
+          }
+        >;
+      }
+    >
+  >((acc, rec) => {
+    if (!acc[rec.zone_name]) {
+      acc[rec.zone_name] = {
+        zoneName: rec.zone_name,
+        total: 0,
+        approved: 0,
+        employees: {},
+      };
+    }
+    acc[rec.zone_name].total += 1;
+    if (rec.is_compliant) acc[rec.zone_name].approved += 1;
+
+    if (!acc[rec.zone_name].employees[rec.user_id]) {
+      acc[rec.zone_name].employees[rec.user_id] = {
+        userId: rec.user_id,
+        userName: rec.user_full_name,
+        userEmail: rec.user_email,
+        items: [],
+      };
+    }
+    acc[rec.zone_name].employees[rec.user_id].items.push(rec);
+    return acc;
+  }, {});
+
+  const activeZonesOnly = zones.filter((z) => z.is_active);
+  const currentKioskZone = zones.find((z) => z.id === kioskZoneId) || activeZonesOnly[0] || null;
 
   return (
     <div style={{ backgroundColor: "var(--color-background-body)" }} className="min-h-screen">
@@ -372,8 +458,8 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
             onChange={(val) => setActiveTab(val as "records" | "zones" | "users")}
             hasDivider
           >
-            <Tab label="Asistencia" value="records" />
-            <Tab label="Áreas y EPP" value="zones" />
+            <Tab label="Bitácora de Asistencia" value="records" />
+            <Tab label="Áreas y Terminal" value="zones" />
             <Tab label="Personal" value="users" />
           </TabList>
 
@@ -382,71 +468,402 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
               <VStack gap={5}>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <VStack gap={0.5}>
-                    <Heading level={3}>Registro Global de Asistencia</Heading>
+                    <Heading level={3}>Bitácora Auditada por Área y Empleado</Heading>
                     <Text type="supporting">
-                      Historial auditado con evidencia fotográfica y similitud biométrica
+                      Visible únicamente para administradores · Incluye evidencia fotográfica y
+                      exportación CSV
                     </Text>
                   </VStack>
 
-                  <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-                    <TextInput
-                      label="Buscar"
-                      isLabelHidden
-                      type="search"
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SegmentedControl
+                      label="Vista de bitácora"
+                      value={recordsViewMode}
+                      onChange={(val) => setRecordsViewMode(val as "grouped" | "table")}
+                    >
+                      <SegmentedControlItem label="Por Área / Empleado" value="grouped" />
+                      <SegmentedControlItem label="Tabla general" value="table" />
+                    </SegmentedControl>
+
+                    <Button
+                      label="CSV"
+                      variant="secondary"
                       size="sm"
-                      hasClear
-                      startIcon={<Search className="h-3.5 w-3.5" />}
-                      placeholder="Buscar empleado o área..."
-                      value={search}
-                      onChange={(val) => handleFilterChange(statusFilter, val)}
-                      width="100%"
+                      icon={<Download className="h-3.5 w-3.5" />}
+                      href={api.exportCsvUrl}
+                      onClick={() =>
+                        setToast({
+                          type: "success",
+                          title: "Exportando reporte",
+                          message: "Se inició la descarga del archivo CSV.",
+                        })
+                      }
                     />
-
-                    <div className="flex items-center gap-2">
-                      <div className="min-w-[165px] flex-1">
-                        <Selector
-                          isLabelHidden
-                          label="Estado"
-                          size="sm"
-                          value={statusFilter}
-                          width="100%"
-                          options={[
-                            { value: "all", label: "Todos los estados" },
-                            { value: "approved", label: "Solo Aprobados" },
-                            { value: "rejected", label: "Solo Rechazados" },
-                          ]}
-                          onChange={(val) => handleFilterChange(val, search)}
-                        />
-                      </div>
-
-                      <Button
-                        label="CSV"
-                        variant="secondary"
-                        size="sm"
-                        icon={<Download className="h-3.5 w-3.5" />}
-                        href={api.exportCsvUrl}
-                        onClick={() =>
-                          setToast({
-                            type: "success",
-                            title: "Exportando reporte",
-                            message: "Se inició la descarga del archivo CSV.",
-                          })
-                        }
-                      />
-                    </div>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Selector
+                    label="Filtrar por Área"
+                    size="sm"
+                    value={zoneFilter || "all"}
+                    width="100%"
+                    options={[
+                      { value: "all", label: "Todas las áreas" },
+                      ...zones.map((z) => ({ value: z.name, label: z.name })),
+                    ]}
+                    onChange={(val) =>
+                      handleFilterChange(
+                        statusFilter,
+                        search,
+                        val === "all" ? "" : val,
+                        employeeFilter
+                      )
+                    }
+                  />
+
+                  <Selector
+                    hasSearch
+                    label="Filtrar por Empleado"
+                    size="sm"
+                    value={employeeFilter}
+                    width="100%"
+                    options={[
+                      { value: "all", label: "Todos los empleados" },
+                      ...users.map((u) => ({ value: String(u.id), label: u.full_name })),
+                    ]}
+                    onChange={(val) =>
+                      handleFilterChange(statusFilter, search, zoneFilter, val)
+                    }
+                  />
+
+                  <Selector
+                    label="Estado EPP"
+                    size="sm"
+                    value={statusFilter}
+                    width="100%"
+                    options={[
+                      { value: "all", label: "Todos los estados" },
+                      { value: "approved", label: "Solo Aprobados" },
+                      { value: "rejected", label: "Solo Rechazados" },
+                    ]}
+                    onChange={(val) =>
+                      handleFilterChange(val, search, zoneFilter, employeeFilter)
+                    }
+                  />
+
+                  <TextInput
+                    label="Búsqueda rápida"
+                    type="search"
+                    size="sm"
+                    hasClear
+                    startIcon={<Search className="h-3.5 w-3.5" />}
+                    placeholder="Nombre o correo..."
+                    value={search}
+                    onChange={(val) =>
+                      handleFilterChange(statusFilter, val, zoneFilter, employeeFilter)
+                    }
+                    width="100%"
+                  />
                 </div>
 
                 {records.length === 0 ? (
                   <div className="py-8 text-center">
                     <Text type="supporting">No hay registros que coincidan con el filtro.</Text>
                   </div>
+                ) : recordsViewMode === "grouped" ? (
+                  <VStack gap={5}>
+                    {Object.values(groupedByArea).map((areaGroup) => (
+                      <div
+                        key={areaGroup.zoneName}
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="rounded-2xl border p-4 sm:p-5"
+                      >
+                        <VStack gap={4}>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <HStack gap={2} vAlign="center">
+                              <MapPin className="h-4 w-4 shrink-0" />
+                              <Heading level={3}>{areaGroup.zoneName}</Heading>
+                            </HStack>
+                            <HStack gap={2} vAlign="center">
+                              <Badge
+                                label={`${areaGroup.approved}/${areaGroup.total} aprobados`}
+                                variant="green"
+                              />
+                              <Badge
+                                label={`${Object.keys(areaGroup.employees).length} empleados`}
+                                variant="neutral"
+                              />
+                            </HStack>
+                          </div>
+
+                          <Divider />
+
+                          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                            {Object.values(areaGroup.employees).map((empGroup) => (
+                              <Card key={empGroup.userId} padding={4}>
+                                <VStack gap={3}>
+                                  <div className="flex items-start justify-between gap-2">
+                                    <VStack gap={0.5}>
+                                      <Text type="label">{empGroup.userName}</Text>
+                                      <Text type="supporting">{empGroup.userEmail}</Text>
+                                    </VStack>
+                                    <Badge
+                                      label={`${empGroup.items.length} marcajes`}
+                                      variant="neutral"
+                                    />
+                                  </div>
+
+                                  <div className="flex flex-col gap-2">
+                                    {empGroup.items.map((rec) => {
+                                      const eppList = [
+                                        rec.has_helmet ? "Casco" : null,
+                                        rec.has_glasses ? "Lentes" : null,
+                                        rec.has_mask ? "Mascarilla" : null,
+                                        rec.has_vest ? "Chaleco" : null,
+                                      ].filter(Boolean);
+
+                                      return (
+                                        <div
+                                          key={rec.id}
+                                          style={{
+                                            backgroundColor: "var(--color-background-muted)",
+                                            borderColor: "var(--color-border-subtle)",
+                                          }}
+                                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2"
+                                        >
+                                          <VStack gap={0.5}>
+                                            <HStack gap={1.5} vAlign="center">
+                                              <Badge
+                                                variant={
+                                                  rec.event_type === "EXIT" ? "orange" : "blue"
+                                                }
+                                                label={
+                                                  rec.event_type === "EXIT" ? "Salida" : "Entrada"
+                                                }
+                                              />
+                                              <Badge
+                                                variant={rec.is_compliant ? "success" : "error"}
+                                                label={
+                                                  rec.is_compliant ? "Aprobado" : "Rechazado"
+                                                }
+                                              />
+                                              <Text hasTabularNumbers type="supporting">
+                                                {new Date(rec.created_at).toLocaleString([], {
+                                                  day: "2-digit",
+                                                  month: "2-digit",
+                                                  hour: "2-digit",
+                                                  minute: "2-digit",
+                                                })}
+                                              </Text>
+                                            </HStack>
+                                            <Text type="supporting">
+                                              EPP: {eppList.length > 0 ? eppList.join(", ") : "Ninguno"}
+                                            </Text>
+                                          </VStack>
+
+                                          {rec.has_evidence && (
+                                            <Button
+                                              label="Foto"
+                                              variant="secondary"
+                                              size="sm"
+                                              icon={<Eye className="h-3.5 w-3.5" />}
+                                              onClick={() => setEvidenceRecordId(rec.id)}
+                                            />
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </VStack>
+                              </Card>
+                            ))}
+                          </div>
+                        </VStack>
+                      </div>
+                    ))}
+                  </VStack>
                 ) : (
-                  <>
-                    <div className="flex flex-col gap-3 md:hidden">
-                      {records.map((rec) => (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr
+                          style={{ borderColor: "var(--color-border-subtle)" }}
+                          className="border-b uppercase"
+                        >
+                          <th className="py-3 pr-3">
+                            <Text type="supporting">Fecha y Hora</Text>
+                          </th>
+                          <th className="py-3 px-3">
+                            <Text type="supporting">Colaborador</Text>
+                          </th>
+                          <th className="py-3 px-3">
+                            <Text type="supporting">Área</Text>
+                          </th>
+                          <th className="py-3 px-3">
+                            <Text type="supporting">Tipo</Text>
+                          </th>
+                          <th className="py-3 px-3">
+                            <Text type="supporting">Estado</Text>
+                          </th>
+                          <th className="py-3 px-2 text-center">
+                            <Text type="supporting">Casco</Text>
+                          </th>
+                          <th className="py-3 px-2 text-center">
+                            <Text type="supporting">Lentes</Text>
+                          </th>
+                          <th className="py-3 px-2 text-center">
+                            <Text type="supporting">Masc.</Text>
+                          </th>
+                          <th className="py-3 px-2 text-center">
+                            <Text type="supporting">Chaleco</Text>
+                          </th>
+                          <th className="py-3 pl-3 text-right">
+                            <Text type="supporting">Foto</Text>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody
+                        style={{ borderColor: "var(--color-border-subtle)" }}
+                        className="divide-y"
+                      >
+                        {records.map((rec) => (
+                          <tr key={rec.id}>
+                            <td className="whitespace-nowrap py-3 pr-3">
+                              <Text hasTabularNumbers type="supporting">
+                                {new Date(rec.created_at).toLocaleString()}
+                              </Text>
+                            </td>
+                            <td className="py-3 px-3">
+                              <VStack gap={0}>
+                                <Text type="label">{rec.user_full_name}</Text>
+                                <Text type="supporting">
+                                  {rec.recognition_method === "face_biometric"
+                                    ? `Biométrico (${Math.round((rec.face_similarity || 0.85) * 100)}%)`
+                                    : "Sesión"}
+                                </Text>
+                              </VStack>
+                            </td>
+                            <td className="py-3 px-3">
+                              <Text type="supporting">{rec.zone_name}</Text>
+                            </td>
+                            <td className="py-3 px-3">
+                              <Badge
+                                variant={rec.event_type === "EXIT" ? "orange" : "blue"}
+                                label={rec.event_type === "EXIT" ? "Salida" : "Entrada"}
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <Badge
+                                variant={rec.is_compliant ? "success" : "error"}
+                                label={rec.is_compliant ? "Aprobado" : "Rechazado"}
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <Text type="supporting">{rec.has_helmet ? "Sí" : "No"}</Text>
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <Text type="supporting">{rec.has_glasses ? "Sí" : "No"}</Text>
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <Text type="supporting">{rec.has_mask ? "Sí" : "No"}</Text>
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <Text type="supporting">{rec.has_vest ? "Sí" : "No"}</Text>
+                            </td>
+                            <td className="py-3 pl-3 text-right">
+                              {rec.has_evidence ? (
+                                <Button
+                                  label="Ver"
+                                  variant="secondary"
+                                  size="sm"
+                                  icon={<Eye className="h-3.5 w-3.5" />}
+                                  onClick={() => setEvidenceRecordId(rec.id)}
+                                />
+                              ) : (
+                                <Text type="supporting">—</Text>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </VStack>
+            </Card>
+          )}
+
+          {activeTab === "zones" && (
+            <VStack gap={5}>
+              <Card padding={5}>
+                <VStack gap={4}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <VStack gap={0.5}>
+                      <Heading level={3}>Área Activa en Terminal de Marcaje</Heading>
+                      <Text type="supporting">
+                        Define qué área y qué equipo de protección obligatorio aplicará la terminal
+                        pública a los colaboradores.
+                      </Text>
+                    </VStack>
+                    {currentKioskZone && (
+                      <Badge
+                        variant="green"
+                        label={`En uso: ${currentKioskZone.name}`}
+                      />
+                    )}
+                  </div>
+
+                  <div className="max-w-md">
+                    <Selector
+                      label="Área asignada al quiosco"
+                      size="md"
+                      width="100%"
+                      startIcon={<MapPin className="h-4 w-4" />}
+                      options={activeZonesOnly.map((z) => ({
+                        value: String(z.id),
+                        label: z.name,
+                        description: z.description || undefined,
+                      }))}
+                      value={kioskZoneId !== null ? String(kioskZoneId) : undefined}
+                      onChange={(val) => handleSelectKioskZone(Number(val))}
+                    />
+                  </div>
+                </VStack>
+              </Card>
+
+              <Card padding={5}>
+                <VStack gap={5}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <HStack gap={2} vAlign="center">
+                      <MapPin className="h-5 w-5 shrink-0" />
+                      <VStack gap={0.5}>
+                        <Heading level={3}>Reglas de EPP por Área Operativa</Heading>
+                        <Text type="supporting">
+                          Si un área exige mascarilla o lentes, el quiosco activa validación en 2
+                          fases anti-suplantación.
+                        </Text>
+                      </VStack>
+                    </HStack>
+
+                    <Button
+                      label="Nueva Área"
+                      variant="primary"
+                      size="sm"
+                      icon={<Plus className="h-4 w-4" />}
+                      onClick={() => setNewZoneModalOpen(true)}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-3 md:hidden">
+                    {zones.map((z) => {
+                      const twoPhase = z.require_mask || z.require_glasses;
+                      return (
                         <div
-                          key={rec.id}
+                          key={z.id}
                           style={{
                             backgroundColor: "var(--color-background-muted)",
                             borderColor: "var(--color-border-subtle)",
@@ -455,366 +872,174 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                         >
                           <div className="flex items-start justify-between gap-2">
                             <VStack gap={0.5}>
-                              <Text type="label">{rec.user_full_name}</Text>
-                              <Text type="supporting">
-                                {rec.zone_name} ·{" "}
-                                {rec.recognition_method === "face_biometric"
-                                  ? `Biométrico (${Math.round((rec.face_similarity || 0.85) * 100)}%)`
-                                  : "Sesión"}
-                              </Text>
-                              <Text hasTabularNumbers type="supporting">
-                                {new Date(rec.created_at).toLocaleString()}
-                              </Text>
+                              <Text type="label">{z.name}</Text>
+                              {z.description && <Text type="supporting">{z.description}</Text>}
                             </VStack>
-                            <Badge
-                              variant={rec.is_compliant ? "success" : "error"}
-                              label={rec.is_compliant ? "Aprobado" : "Rechazado"}
+                            <Button
+                              label={z.is_active ? "Activa" : "Inactiva"}
+                              variant={z.is_active ? "secondary" : "ghost"}
+                              size="sm"
+                              onClick={() => handleToggleZoneRule(z, "is_active")}
                             />
                           </div>
 
-                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <Badge
-                                variant={rec.event_type === "EXIT" ? "orange" : "blue"}
-                                label={rec.event_type === "EXIT" ? "Salida" : "Entrada"}
-                              />
-                              <Badge
-                                variant="neutral"
-                                label={`EPP: ${
-                                  [
-                                    rec.has_helmet ? "Casco" : null,
-                                    rec.has_glasses ? "Lentes" : null,
-                                    rec.has_mask ? "Masc." : null,
-                                    rec.has_vest ? "Chaleco" : null,
-                                  ]
-                                    .filter(Boolean)
-                                    .join(", ") || "Ninguno"
-                                }`}
-                              />
-                            </div>
-
-                            {rec.has_evidence && (
-                              <Button
-                                label="Foto"
-                                variant="secondary"
-                                size="sm"
-                                icon={<Eye className="h-3.5 w-3.5" />}
-                                onClick={() => setEvidenceRecordId(rec.id)}
-                              />
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <Badge
+                              variant={twoPhase ? "yellow" : "green"}
+                              label={twoPhase ? "2 Fases (Rostro → EPP)" : "1 Paso Simultáneo"}
+                            />
+                            {z.id === kioskZoneId && (
+                              <Badge variant="blue" label="Activa en Quiosco" />
                             )}
                           </div>
-                        </div>
-                      ))}
-                    </div>
 
-                    <div className="hidden overflow-x-auto md:block">
-                      <table className="w-full text-left text-xs">
-                        <thead>
-                          <tr
-                            style={{ borderColor: "var(--color-border-subtle)" }}
-                            className="border-b uppercase"
-                          >
-                            <th className="py-3 pr-3">
-                              <Text type="supporting">Fecha y Hora</Text>
-                            </th>
-                            <th className="py-3 px-3">
-                              <Text type="supporting">Colaborador</Text>
-                            </th>
-                            <th className="py-3 px-3">
-                              <Text type="supporting">Área</Text>
-                            </th>
-                            <th className="py-3 px-3">
-                              <Text type="supporting">Tipo</Text>
-                            </th>
-                            <th className="py-3 px-3">
-                              <Text type="supporting">Estado</Text>
-                            </th>
-                            <th className="py-3 px-2 text-center">
-                              <Text type="supporting">Casco</Text>
-                            </th>
-                            <th className="py-3 px-2 text-center">
-                              <Text type="supporting">Lentes</Text>
-                            </th>
-                            <th className="py-3 px-2 text-center">
-                              <Text type="supporting">Masc.</Text>
-                            </th>
-                            <th className="py-3 px-2 text-center">
-                              <Text type="supporting">Chaleco</Text>
-                            </th>
-                            <th className="py-3 pl-3 text-right">
-                              <Text type="supporting">Foto</Text>
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody
+                          <div className="mt-4 grid grid-cols-2 gap-3">
+                            <Switch
+                              label="Casco"
+                              size="sm"
+                              value={z.require_helmet}
+                              onChange={() => handleToggleZoneRule(z, "require_helmet")}
+                            />
+                            <Switch
+                              label="Lentes"
+                              size="sm"
+                              value={z.require_glasses}
+                              onChange={() => handleToggleZoneRule(z, "require_glasses")}
+                            />
+                            <Switch
+                              label="Mascarilla"
+                              size="sm"
+                              value={z.require_mask}
+                              onChange={() => handleToggleZoneRule(z, "require_mask")}
+                            />
+                            <Switch
+                              label="Chaleco"
+                              size="sm"
+                              value={z.require_vest}
+                              onChange={() => handleToggleZoneRule(z, "require_vest")}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr
                           style={{ borderColor: "var(--color-border-subtle)" }}
-                          className="divide-y"
+                          className="border-b uppercase"
                         >
-                          {records.map((rec) => (
-                            <tr key={rec.id}>
-                              <td className="whitespace-nowrap py-3 pr-3">
-                                <Text hasTabularNumbers type="supporting">
-                                  {new Date(rec.created_at).toLocaleString()}
-                                </Text>
-                              </td>
-                              <td className="py-3 px-3">
-                                <VStack gap={0}>
-                                  <Text type="label">{rec.user_full_name}</Text>
-                                  <Text type="supporting">
-                                    {rec.recognition_method === "face_biometric"
-                                      ? `Biométrico (${Math.round((rec.face_similarity || 0.85) * 100)}%)`
-                                      : "Sesión"}
-                                  </Text>
+                          <th className="py-3 pr-4">
+                            <Text type="supporting">Área / Departamento</Text>
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            <Text type="supporting">Casco</Text>
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            <Text type="supporting">Lentes</Text>
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            <Text type="supporting">Mascarilla</Text>
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            <Text type="supporting">Chaleco</Text>
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            <Text type="supporting">Flujo Quiosco</Text>
+                          </th>
+                          <th className="py-3 pl-3 text-right">
+                            <Text type="supporting">Estado</Text>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody
+                        style={{ borderColor: "var(--color-border-subtle)" }}
+                        className="divide-y"
+                      >
+                        {zones.map((z) => {
+                          const twoPhase = z.require_mask || z.require_glasses;
+                          return (
+                            <tr key={z.id}>
+                              <td className="py-3.5 pr-4">
+                                <VStack gap={0.5}>
+                                  <HStack gap={2} vAlign="center">
+                                    <Text type="label">{z.name}</Text>
+                                    {z.id === kioskZoneId && (
+                                      <Badge variant="blue" label="En Terminal" />
+                                    )}
+                                  </HStack>
+                                  {z.description && <Text type="supporting">{z.description}</Text>}
                                 </VStack>
                               </td>
-                              <td className="py-3 px-3">
-                                <Text type="supporting">{rec.zone_name}</Text>
-                              </td>
-                              <td className="py-3 px-3">
-                                <Badge
-                                  variant={rec.event_type === "EXIT" ? "orange" : "blue"}
-                                  label={rec.event_type === "EXIT" ? "Salida" : "Entrada"}
-                                />
-                              </td>
-                              <td className="py-3 px-3">
-                                <Badge
-                                  variant={rec.is_compliant ? "success" : "error"}
-                                  label={rec.is_compliant ? "Aprobado" : "Rechazado"}
-                                />
-                              </td>
-                              <td className="py-3 px-2 text-center">
-                                <Text type="supporting">{rec.has_helmet ? "Sí" : "No"}</Text>
-                              </td>
-                              <td className="py-3 px-2 text-center">
-                                <Text type="supporting">{rec.has_glasses ? "Sí" : "No"}</Text>
-                              </td>
-                              <td className="py-3 px-2 text-center">
-                                <Text type="supporting">{rec.has_mask ? "Sí" : "No"}</Text>
-                              </td>
-                              <td className="py-3 px-2 text-center">
-                                <Text type="supporting">{rec.has_vest ? "Sí" : "No"}</Text>
-                              </td>
-                              <td className="py-3 pl-3 text-right">
-                                {rec.has_evidence ? (
-                                  <Button
-                                    label="Ver"
-                                    variant="secondary"
+                              <td className="py-3.5 px-3">
+                                <div className="flex justify-center">
+                                  <Switch
+                                    isLabelHidden
+                                    label={`Exigir casco en ${z.name}`}
                                     size="sm"
-                                    icon={<Eye className="h-3.5 w-3.5" />}
-                                    onClick={() => setEvidenceRecordId(rec.id)}
+                                    value={z.require_helmet}
+                                    onChange={() => handleToggleZoneRule(z, "require_helmet")}
                                   />
-                                ) : (
-                                  <Text type="supporting">—</Text>
-                                )}
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-3">
+                                <div className="flex justify-center">
+                                  <Switch
+                                    isLabelHidden
+                                    label={`Exigir lentes en ${z.name}`}
+                                    size="sm"
+                                    value={z.require_glasses}
+                                    onChange={() => handleToggleZoneRule(z, "require_glasses")}
+                                  />
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-3">
+                                <div className="flex justify-center">
+                                  <Switch
+                                    isLabelHidden
+                                    label={`Exigir mascarilla en ${z.name}`}
+                                    size="sm"
+                                    value={z.require_mask}
+                                    onChange={() => handleToggleZoneRule(z, "require_mask")}
+                                  />
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-3">
+                                <div className="flex justify-center">
+                                  <Switch
+                                    isLabelHidden
+                                    label={`Exigir chaleco en ${z.name}`}
+                                    size="sm"
+                                    value={z.require_vest}
+                                    onChange={() => handleToggleZoneRule(z, "require_vest")}
+                                  />
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <Badge
+                                  variant={twoPhase ? "yellow" : "green"}
+                                  label={twoPhase ? "2 Fases (Rostro → EPP)" : "1 Paso Simultáneo"}
+                                />
+                              </td>
+                              <td className="py-3.5 pl-3 text-right">
+                                <Button
+                                  label={z.is_active ? "Activa" : "Inactiva"}
+                                  variant={z.is_active ? "secondary" : "ghost"}
+                                  size="sm"
+                                  onClick={() => handleToggleZoneRule(z, "is_active")}
+                                />
                               </td>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                )}
-              </VStack>
-            </Card>
-          )}
-
-          {activeTab === "zones" && (
-            <Card padding={5}>
-              <VStack gap={5}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <HStack gap={2} vAlign="center">
-                    <MapPin className="h-5 w-5 shrink-0" />
-                    <VStack gap={0.5}>
-                      <Heading level={3}>Áreas Operativas y Normativa EPP</Heading>
-                      <Text type="supporting">
-                        Si un área exige mascarilla o lentes, el quiosco activa validación en 2
-                        fases anti-suplantación.
-                      </Text>
-                    </VStack>
-                  </HStack>
-
-                  <Button
-                    label="Nueva Área"
-                    variant="primary"
-                    size="sm"
-                    icon={<Plus className="h-4 w-4" />}
-                    onClick={() => setNewZoneModalOpen(true)}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-3 md:hidden">
-                  {zones.map((z) => {
-                    const twoPhase = z.require_mask || z.require_glasses;
-                    return (
-                      <div
-                        key={z.id}
-                        style={{
-                          backgroundColor: "var(--color-background-muted)",
-                          borderColor: "var(--color-border-subtle)",
-                        }}
-                        className="rounded-xl border p-4"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <VStack gap={0.5}>
-                            <Text type="label">{z.name}</Text>
-                            {z.description && <Text type="supporting">{z.description}</Text>}
-                          </VStack>
-                          <Button
-                            label={z.is_active ? "Activa" : "Inactiva"}
-                            variant={z.is_active ? "secondary" : "ghost"}
-                            size="sm"
-                            onClick={() => handleToggleZoneRule(z, "is_active")}
-                          />
-                        </div>
-
-                        <div className="mt-3">
-                          <Badge
-                            variant={twoPhase ? "yellow" : "green"}
-                            label={twoPhase ? "2 Fases (Rostro → EPP)" : "1 Paso Simultáneo"}
-                          />
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-2 gap-3">
-                          <Switch
-                            label="Casco"
-                            size="sm"
-                            value={z.require_helmet}
-                            onChange={() => handleToggleZoneRule(z, "require_helmet")}
-                          />
-                          <Switch
-                            label="Lentes"
-                            size="sm"
-                            value={z.require_glasses}
-                            onChange={() => handleToggleZoneRule(z, "require_glasses")}
-                          />
-                          <Switch
-                            label="Mascarilla"
-                            size="sm"
-                            value={z.require_mask}
-                            onChange={() => handleToggleZoneRule(z, "require_mask")}
-                          />
-                          <Switch
-                            label="Chaleco"
-                            size="sm"
-                            value={z.require_vest}
-                            onChange={() => handleToggleZoneRule(z, "require_vest")}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="hidden overflow-x-auto md:block">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr
-                        style={{ borderColor: "var(--color-border-subtle)" }}
-                        className="border-b uppercase"
-                      >
-                        <th className="py-3 pr-4">
-                          <Text type="supporting">Área / Departamento</Text>
-                        </th>
-                        <th className="py-3 px-3 text-center">
-                          <Text type="supporting">Casco</Text>
-                        </th>
-                        <th className="py-3 px-3 text-center">
-                          <Text type="supporting">Lentes</Text>
-                        </th>
-                        <th className="py-3 px-3 text-center">
-                          <Text type="supporting">Mascarilla</Text>
-                        </th>
-                        <th className="py-3 px-3 text-center">
-                          <Text type="supporting">Chaleco</Text>
-                        </th>
-                        <th className="py-3 px-3 text-center">
-                          <Text type="supporting">Flujo Quiosco</Text>
-                        </th>
-                        <th className="py-3 pl-3 text-right">
-                          <Text type="supporting">Estado</Text>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody
-                      style={{ borderColor: "var(--color-border-subtle)" }}
-                      className="divide-y"
-                    >
-                      {zones.map((z) => {
-                        const twoPhase = z.require_mask || z.require_glasses;
-                        return (
-                          <tr key={z.id}>
-                            <td className="py-3.5 pr-4">
-                              <VStack gap={0.5}>
-                                <Text type="label">{z.name}</Text>
-                                {z.description && <Text type="supporting">{z.description}</Text>}
-                              </VStack>
-                            </td>
-                            <td className="py-3.5 px-3">
-                              <div className="flex justify-center">
-                                <Switch
-                                  isLabelHidden
-                                  label={`Exigir casco en ${z.name}`}
-                                  size="sm"
-                                  value={z.require_helmet}
-                                  onChange={() => handleToggleZoneRule(z, "require_helmet")}
-                                />
-                              </div>
-                            </td>
-                            <td className="py-3.5 px-3">
-                              <div className="flex justify-center">
-                                <Switch
-                                  isLabelHidden
-                                  label={`Exigir lentes en ${z.name}`}
-                                  size="sm"
-                                  value={z.require_glasses}
-                                  onChange={() => handleToggleZoneRule(z, "require_glasses")}
-                                />
-                              </div>
-                            </td>
-                            <td className="py-3.5 px-3">
-                              <div className="flex justify-center">
-                                <Switch
-                                  isLabelHidden
-                                  label={`Exigir mascarilla en ${z.name}`}
-                                  size="sm"
-                                  value={z.require_mask}
-                                  onChange={() => handleToggleZoneRule(z, "require_mask")}
-                                />
-                              </div>
-                            </td>
-                            <td className="py-3.5 px-3">
-                              <div className="flex justify-center">
-                                <Switch
-                                  isLabelHidden
-                                  label={`Exigir chaleco en ${z.name}`}
-                                  size="sm"
-                                  value={z.require_vest}
-                                  onChange={() => handleToggleZoneRule(z, "require_vest")}
-                                />
-                              </div>
-                            </td>
-                            <td className="py-3.5 px-3 text-center">
-                              <Badge
-                                variant={twoPhase ? "yellow" : "green"}
-                                label={twoPhase ? "2 Fases (Rostro → EPP)" : "1 Paso Simultáneo"}
-                              />
-                            </td>
-                            <td className="py-3.5 pl-3 text-right">
-                              <Button
-                                label={z.is_active ? "Activa" : "Inactiva"}
-                                variant={z.is_active ? "secondary" : "ghost"}
-                                size="sm"
-                                onClick={() => handleToggleZoneRule(z, "is_active")}
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </VStack>
-            </Card>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </VStack>
+              </Card>
+            </VStack>
           )}
 
           {activeTab === "users" && (
