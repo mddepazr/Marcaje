@@ -19,6 +19,7 @@ TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
 class RegisterIn(BaseModel):
     full_name: str = Field(min_length=2, max_length=120)
+    employee_code: str = Field(min_length=2, max_length=40)
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
 
@@ -34,6 +35,7 @@ class UserOut(BaseModel):
     email: str
     role: str
     job_title: str
+    employee_code: str | None = None
     has_face_enrolled: bool = False
     is_active: bool
 
@@ -46,6 +48,7 @@ def serialize_user(user: User) -> UserOut:
         email=user.email,
         role=user.role,
         job_title=user.job_title,
+        employee_code=user.employee_code,
         has_face_enrolled=enrolled,
         is_active=user.is_active,
     )
@@ -109,12 +112,27 @@ def get_current_user(
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterIn, response: Response, db: Session = Depends(get_db)):
     email_clean = payload.email.lower().strip()
+    code_clean = payload.employee_code.strip().upper()
+    if len(code_clean) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ingresa un código o carné de empleado válido.",
+        )
+
     existing = db.scalar(select(User).where(User.email == email_clean))
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Este correo ya está registrado.")
 
+    existing_code = db.scalar(select(User).where(User.employee_code == code_clean))
+    if existing_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El código o carné '{code_clean}' ya está asignado a otro colaborador.",
+        )
+
     user = User(
         full_name=payload.full_name.strip(),
+        employee_code=code_clean,
         email=email_clean,
         hashed_password=password_hash.hash(payload.password),
         role="employee",

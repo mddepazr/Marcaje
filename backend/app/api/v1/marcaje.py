@@ -165,17 +165,21 @@ def enroll_face(
     if not target_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Colaborador no encontrado.")
 
-    if payload.employee_code is not None and payload.employee_code.strip():
-        clean_code = payload.employee_code.strip().upper()
-        dup = db.scalar(
-            select(User).where(User.employee_code == clean_code, User.id != target_user.id)
+    clean_code = (payload.employee_code or "").strip().upper()
+    if len(clean_code) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El código o carné de empleado es obligatorio.",
         )
-        if dup:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"El código '{clean_code}' ya pertenece a {dup.full_name}.",
-            )
-        target_user.employee_code = clean_code
+    dup = db.scalar(
+        select(User).where(User.employee_code == clean_code, User.id != target_user.id)
+    )
+    if dup:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El código '{clean_code}' ya pertenece a {dup.full_name}.",
+        )
+    target_user.employee_code = clean_code
 
     new_descriptor = [round(float(v), 6) for v in payload.face_descriptor]
     new_samples = [

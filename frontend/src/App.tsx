@@ -24,6 +24,7 @@ export function App() {
 
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [fullName, setFullName] = useState("");
+  const [employeeCode, setEmployeeCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -63,11 +64,12 @@ export function App() {
     setSubmitting(true);
     try {
       const loggedUser = isRegister
-        ? await api.register({ full_name: fullName, email, password })
+        ? await api.register({ full_name: fullName, employee_code: employeeCode.trim().toUpperCase(), email, password })
         : await api.login({ email, password });
       setUser(loggedUser);
       setShowAuthScreen(false);
       setFullName("");
+      setEmployeeCode("");
       setEmail("");
       setPassword("");
       setConfirmPassword("");
@@ -159,14 +161,24 @@ export function App() {
             <form onSubmit={handleAuthSubmit}>
               <VStack gap={4}>
                 {isRegister && (
-                  <TextInput
-                    isRequired
-                    label="Nombre completo"
-                    placeholder="Ej. Emily Morales"
-                    value={fullName}
-                    onChange={setFullName}
-                    width="100%"
-                  />
+                  <>
+                    <TextInput
+                      isRequired
+                      label="Nombre completo"
+                      placeholder="Ej. Emily Morales"
+                      value={fullName}
+                      onChange={setFullName}
+                      width="100%"
+                    />
+                    <TextInput
+                      isRequired
+                      label="Código o carné de empleado"
+                      placeholder="Ej. 2500588"
+                      value={employeeCode}
+                      onChange={setEmployeeCode}
+                      width="100%"
+                    />
+                  </>
                 )}
 
                 <TextInput

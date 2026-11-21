@@ -9,6 +9,7 @@ interface Props {
 export function AuthForm({ onSuccess }: Props) {
   const [isRegister, setIsRegister] = useState(false);
   const [fullName, setFullName] = useState("");
+  const [employeeCode, setEmployeeCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -25,7 +26,12 @@ export function AuthForm({ onSuccess }: Props) {
     setLoading(true);
     try {
       if (isRegister) {
-        await api.register({ full_name: fullName, email, password });
+        await api.register({
+          full_name: fullName,
+          employee_code: employeeCode.trim().toUpperCase(),
+          email,
+          password,
+        });
       }
       const user = await api.login({ email, password });
       onSuccess(user);
@@ -51,17 +57,33 @@ export function AuthForm({ onSuccess }: Props) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {isRegister && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-300">Nombre completo</label>
-              <input
-                type="text"
-                required
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Ej. Marcos de Páz"
-                className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
-              />
-            </div>
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-300">Nombre completo</label>
+                <input
+                  type="text"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Ej. Marcos de Páz"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-300">
+                  Código o carné de empleado
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={employeeCode}
+                  onChange={(e) => setEmployeeCode(e.target.value)}
+                  placeholder="Ej. 2500588"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+                />
+              </div>
+            </>
           )}
 
           <div>

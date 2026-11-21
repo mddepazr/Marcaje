@@ -33,7 +33,7 @@ class BiometricProfileOut(BaseModel):
 
 class FaceEnrollIn(BaseModel):
     user_id: int | None = None
-    employee_code: str | None = Field(default=None, max_length=40)
+    employee_code: str = Field(min_length=2, max_length=40)
     face_descriptor: list[float] = Field(min_length=128, max_length=128)
     # Muestras individuales capturadas al enrolar (hasta 8). Mejoran la precisión
     # porque cada persona se compara contra varias tomas y no solo contra el promedio.

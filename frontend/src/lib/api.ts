@@ -6,6 +6,7 @@ export interface User {
   email: string;
   role: "employee" | "admin";
   job_title: string;
+  employee_code?: string | null;
   has_face_enrolled: boolean;
   is_active: boolean;
 }
@@ -153,7 +154,7 @@ async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 6
 }
 
 export const api = {
-  register: (data: { full_name: string; email: string; password: string }) =>
+  register: (data: { full_name: string; employee_code: string; email: string; password: string }) =>
     request<User>("/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -179,7 +180,7 @@ export const api = {
 
   enrollFace: (data: {
     user_id?: number;
-    employee_code?: string;
+    employee_code: string;
     face_descriptor: number[];
     face_samples?: number[][];
   }) =>

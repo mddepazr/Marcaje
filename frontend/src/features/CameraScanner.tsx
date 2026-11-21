@@ -196,6 +196,7 @@ export function CameraScanner({
   useEffect(() => {
     if (user) {
       setEnrollTargetUserId(user.id);
+      setEnrollCode(user.employee_code || "");
       if (!user.has_face_enrolled) {
         setEnrollMode("camera");
         setEnrollOpen(true);
@@ -563,6 +564,23 @@ export function CameraScanner({
   const handleEnrollFaceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const cleanCode = enrollCode.trim().toUpperCase();
+    if (cleanCode.length < 2) {
+      setToast({
+        type: "error",
+        title: "Carné obligatorio",
+        message: "Ingresa el código o carné de empleado antes de guardar el perfil.",
+      });
+      return;
+    }
+    if (!resolvedEnrollUser) {
+      setToast({
+        type: "error",
+        title: "Colaborador no identificado",
+        message: "Ingresa un carné válido enlazado a un colaborador registrado.",
+      });
+      return;
+    }
     setEnrolling(true);
 
     try {
@@ -613,16 +631,16 @@ export function CameraScanner({
         samplesToSave = collected;
       }
 
-      const targetId = user.role === "admin" ? enrollTargetUserId : user.id;
+      const targetId = resolvedEnrollUser.id;
       const saved = await api.enrollFace({
         user_id: targetId,
-        employee_code: enrollCode.trim() || undefined,
+        employee_code: cleanCode,
         face_descriptor: descriptorToSave,
         face_samples: samplesToSave,
       });
 
       if (targetId === user.id) {
-        onUserUpdated?.({ ...user, has_face_enrolled: true });
+        onUserUpdated?.({ ...user, employee_code: cleanCode, has_face_enrolled: true });
         setJustEnrolledSelf(true);
       }
 
@@ -705,7 +723,22 @@ export function CameraScanner({
     description: z.description || undefined,
   }));
 
-  const userOptions = allUsers.map((u) => ({
+  const normalizedEnrollCode = enrollCode.trim().toUpperCase();
+  const matchedUserByCode =
+    isAdmin && normalizedEnrollCode.length > 0
+      ? allUsers.find((u) => (u.employee_code || "").trim().toUpperCase() === normalizedEnrollCode) || null
+      : null;
+  const usersWithoutCode = allUsers.filter((u) => !(u.employee_code || "").trim());
+  const resolvedEnrollUser = isAdmin
+    ? matchedUserByCode || allUsers.find((u) => u.id === enrollTargetUserId) || null
+    : user;
+  const canSubmitEnroll = Boolean(
+    normalizedEnrollCode.length >= 2 &&
+      resolvedEnrollUser &&
+      (!isAdmin || matchedUserByCode !== null || usersWithoutCode.length > 0)
+  );
+
+  const userOptions = usersWithoutCode.map((u) => ({
     value: String(u.id),
     label: u.full_name,
     description: u.email,
@@ -772,6 +805,7 @@ export function CameraScanner({
                   icon={<UserPlus className="h-3.5 w-3.5" />}
                   onClick={() => {
                     setEnrollTargetUserId(user.id);
+                    setEnrollCode(user.employee_code || "");
                     setEnrollMode("camera");
                     setEnrollOpen(true);
                   }}
@@ -1188,13 +1222,13 @@ export function CameraScanner({
                 }}
                 subtitle={
                   needsInitialEnrollment
-                    ? `Hola ${user.full_name}, captura tu rostro una sola vez para completar tu registro`
-                    : "Captura el rostro descubierto para reconocimiento facial automático"
+                    ? `Hola ${user.full_name}, captura tu rostro para completar tu registro`
+                    : "Ingresa el carné del colaborador y captura su rostro descubierto"
                 }
                 title="Registrar Perfil Biométrico"
               />
 
-              <div className="max-h-[58dvh] overflow-y-auto overscroll-contain pr-1">
+              <div className="max-h-[48dvh] overflow-y-auto overscroll-contain pr-1">
                 <VStack gap={3}>
                   <SegmentedControl
                     label="Método de captura biométrica"
@@ -1217,7 +1251,7 @@ export function CameraScanner({
                   {enrollMode === "camera" ? (
                     <div
                       style={{ borderColor: "var(--color-border-subtle)" }}
-                      className="relative mx-auto aspect-[4/3] max-h-56 w-full overflow-hidden rounded-2xl border bg-black"
+                      className="relative mx-auto h-44 w-full overflow-hidden rounded-2xl border bg-black sm:h-48"
                     >
                       <video
                         ref={(el) => {
@@ -1233,10 +1267,12 @@ export function CameraScanner({
                         className="h-full w-full -scale-x-100 object-cover"
                       />
                       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                        <div className="h-32 w-24 rounded-full border-2 border-dashed border-emerald-400/80" />
+                        <div className="h-28 w-20 rounded-full border-2 border-dashed border-emerald-400/80" />
                       </div>
                       <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-white/90">
-                        Rostro descubierto, de frente y quieto ~2 s al guardar
+                        {enrolling
+                          ? "Capturando muestras faciales... Quédate quieto"
+                          : "Ubica el rostro de frente y pulsa Guardar Perfil"}
                       </div>
                     </div>
                   ) : (
@@ -1260,17 +1296,17 @@ export function CameraScanner({
                           backgroundColor: "var(--color-background-muted)",
                           borderColor: "var(--color-border-subtle)",
                         }}
-                        className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed p-5 text-center transition hover:opacity-90"
+                        className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed p-4 text-center transition hover:opacity-90"
                       >
                         {enrollPhotoPreview ? (
                           <img
                             src={enrollPhotoPreview}
                             alt="Vista previa rostro"
-                            className="h-32 w-32 rounded-2xl object-cover"
+                            className="h-28 w-28 rounded-2xl object-cover"
                           />
                         ) : (
-                          <VStack gap={1.5} hAlign="center">
-                            <Upload className="h-6 w-6" />
+                          <VStack gap={1} hAlign="center">
+                            <Upload className="h-5 w-5" />
                             <Text type="label">Seleccionar foto frontal del colaborador</Text>
                             <Text type="supporting">
                               JPG, PNG o WEBP · Sin mascarilla ni lentes oscuros
@@ -1281,25 +1317,103 @@ export function CameraScanner({
                     </div>
                   )}
 
-                  {user.role === "admin" && allUsers.length > 0 && (
-                    <Selector
-                      hasSearch
-                      label="Colaborador a registrar"
-                      options={userOptions}
-                      value={String(enrollTargetUserId)}
-                      width="100%"
-                      onChange={(val) => setEnrollTargetUserId(Number(val))}
-                    />
-                  )}
-
                   <TextInput
-                    isOptional
+                    isRequired
                     label="Código o carné de empleado"
-                    placeholder="Ej. 2500587"
+                    placeholder="Ingresa el carné (ej. 2500587)"
                     value={enrollCode}
-                    onChange={setEnrollCode}
+                    onChange={(val) => {
+                      setEnrollCode(val);
+                      if (isAdmin) {
+                        const clean = val.trim().toUpperCase();
+                        const found = allUsers.find(
+                          (u) => (u.employee_code || "").trim().toUpperCase() === clean
+                        );
+                        if (found) {
+                          setEnrollTargetUserId(found.id);
+                        }
+                      }
+                    }}
                     width="100%"
                   />
+
+                  <VStack gap={1}>
+                    <Text type="supporting">Colaborador a registrar</Text>
+                    {!isAdmin ? (
+                      <div
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="flex items-center justify-between rounded-xl border px-3.5 py-2.5"
+                      >
+                        <VStack gap={0}>
+                          <Text type="label">{user.full_name}</Text>
+                          <Text type="supporting">{user.job_title}</Text>
+                        </VStack>
+                        <Badge label="Enlazado" variant="green" />
+                      </div>
+                    ) : normalizedEnrollCode.length === 0 ? (
+                      <div
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="rounded-xl border px-3.5 py-2.5"
+                      >
+                        <Text type="supporting">
+                          Escribe el carné arriba para mostrar automáticamente el nombre del colaborador.
+                        </Text>
+                      </div>
+                    ) : matchedUserByCode ? (
+                      <div
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5"
+                      >
+                        <VStack gap={0}>
+                          <Text type="label">{matchedUserByCode.full_name}</Text>
+                          <Text type="supporting">
+                            {matchedUserByCode.job_title} · {matchedUserByCode.email}
+                          </Text>
+                        </VStack>
+                        <Badge label="Encontrado" variant="green" />
+                      </div>
+                    ) : usersWithoutCode.length > 0 ? (
+                      <VStack gap={2}>
+                        <Text type="supporting">
+                          Carné nuevo · Selecciona a qué colaborador sin carné deseas vincularlo:
+                        </Text>
+                        <Selector
+                          hasSearch
+                          isLabelHidden
+                          label="Vincular carné a colaborador"
+                          options={userOptions}
+                          value={
+                            usersWithoutCode.some((u) => u.id === enrollTargetUserId)
+                              ? String(enrollTargetUserId)
+                              : String(usersWithoutCode[0].id)
+                          }
+                          width="100%"
+                          onChange={(val) => setEnrollTargetUserId(Number(val))}
+                        />
+                      </VStack>
+                    ) : (
+                      <div
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="rounded-xl border px-3.5 py-2.5"
+                      >
+                        <Text type="supporting">
+                          No existe ningún colaborador con el carné "{normalizedEnrollCode}".
+                        </Text>
+                      </div>
+                    )}
+                  </VStack>
                 </VStack>
               </div>
 
@@ -1313,8 +1427,9 @@ export function CameraScanner({
                   variant="secondary"
                 />
                 <Button
+                  isDisabled={!canSubmitEnroll}
                   isLoading={enrolling}
-                  label={enrolling ? "Procesando rostro..." : "Guardar Perfil"}
+                  label={enrolling ? "Capturando rostro..." : "Guardar Perfil"}
                   type="submit"
                   variant="primary"
                 />
