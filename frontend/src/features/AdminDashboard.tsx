@@ -52,6 +52,44 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [zones, setZones] = useState<WorkZone[]>([]);
   const [kioskZoneId, setKioskZoneId] = useState<number | null>(null);
+  const [eppTimerSeconds, setEppTimerSeconds] = useState<number>(() => {
+    const saved = Number(localStorage.getItem("epp_phase2_seconds"));
+    return Number.isFinite(saved) && saved >= 5 && saved <= 60 ? saved : 15;
+  });
+  const [savingTimer, setSavingTimer] = useState(false);
+
+  useEffect(() => {
+    api.getEppTimer()
+      .then((res) => {
+        const secs = Math.max(5, Math.min(60, Number(res.seconds) || 15));
+        setEppTimerSeconds(secs);
+        localStorage.setItem("epp_phase2_seconds", String(secs));
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveEppTimer = async (nextSeconds?: number) => {
+    const secs = Math.max(5, Math.min(60, Math.round(nextSeconds ?? eppTimerSeconds)));
+    setEppTimerSeconds(secs);
+    localStorage.setItem("epp_phase2_seconds", String(secs));
+    setSavingTimer(true);
+    try {
+      await api.updateEppTimer(secs);
+      setToast({
+        type: "success",
+        title: "Tiempo actualizado",
+        message: `La terminal ahora otorga ${secs} segundos para colocarse el EPP.`,
+      });
+    } catch {
+      setToast({
+        type: "error",
+        title: "No se pudo guardar",
+        message: "Intenta nuevamente actualizar el tiempo de espera.",
+      });
+    } finally {
+      setSavingTimer(false);
+    }
+  };
   const [records, setRecords] = useState<AdminAttendanceRecord[]>([]);
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
@@ -833,6 +871,55 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                 <VStack gap={4}>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <VStack gap={0.5}>
+                      <div
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold">Tiempo para colocarse el EPP (Fase 2)</p>
+                          <p className="text-xs opacity-75">
+                            Segundos disponibles tras reconocer el rostro antes de reiniciar (5s – 60s).
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {[10, 15, 20, 30, 45].map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => handleSaveEppTimer(preset)}
+                              disabled={savingTimer}
+                              style={{
+                                borderColor: "var(--color-border-subtle)",
+                                backgroundColor:
+                                  eppTimerSeconds === preset
+                                    ? "var(--color-background-primary)"
+                                    : "transparent",
+                              }}
+                              className="rounded-lg border px-2.5 py-1 text-xs font-medium transition hover:opacity-80"
+                            >
+                              {preset}s
+                            </button>
+                          ))}
+                          <input
+                            type="number"
+                            min={5}
+                            max={60}
+                            value={eppTimerSeconds}
+                            onChange={(e) => setEppTimerSeconds(Number(e.target.value) || 15)}
+                            style={{ borderColor: "var(--color-border-subtle)" }}
+                            className="w-16 rounded-lg border bg-transparent px-2 py-1 text-center text-sm"
+                          />
+                          <Button
+                            isLoading={savingTimer}
+                            label="Guardar"
+                            onClick={() => handleSaveEppTimer()}
+                            variant="secondary"
+                          />
+                        </div>
+                      </div>
                       <Heading level={3}>Área Activa en Terminal de Marcaje</Heading>
                       <Text type="supporting">
                         Define qué área y qué equipo de protección obligatorio aplicará la terminal

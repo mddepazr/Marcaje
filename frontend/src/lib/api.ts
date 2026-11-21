@@ -175,6 +175,12 @@ export const api = {
   getZones: () => request<WorkZone[]>("/marcaje/zones"),
 
   getKioskConfig: () => request<KioskConfig>("/marcaje/kiosk-config"),
+  getEppTimer: () => request<{ seconds: number }>("/marcaje/epp-timer"),
+  updateEppTimer: (seconds: number) =>
+    request<{ seconds: number }>("/marcaje/epp-timer", {
+      method: "PUT",
+      body: JSON.stringify({ seconds }),
+    }),
 
   getBiometricDirectory: () => request<BiometricProfile[]>("/marcaje/biometric-directory"),
 

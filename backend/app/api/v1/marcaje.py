@@ -3,7 +3,7 @@ import math
 from pathlib import Path
 import uuid
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user, get_optional_user
@@ -434,3 +434,37 @@ def get_history(
         )
         for rec, u in rows
     ]
+
+
+_EPP_TIMER_FILE = "/tmp/epp_phase2_timer_seconds.txt"
+
+
+def _read_epp_timer_seconds() -> int:
+    try:
+        with open(_EPP_TIMER_FILE, "r", encoding="utf-8") as fh:
+            val = int(fh.read().strip())
+            return max(5, min(60, val))
+    except Exception:
+        return 15
+
+
+class _EppTimerPayload(BaseModel):
+    seconds: int = Field(ge=5, le=60)
+
+
+@router.get("/epp-timer")
+def get_epp_timer():
+    return {"seconds": _read_epp_timer_seconds()}
+
+
+@router.put("/epp-timer")
+def update_epp_timer(payload: _EppTimerPayload, current_user: User = Depends(get_current_user)):
+    if getattr(current_user, "role", None) != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores.")
+    secs = max(5, min(60, int(payload.seconds)))
+    try:
+        with open(_EPP_TIMER_FILE, "w", encoding="utf-8") as fh:
+            fh.write(str(secs))
+    except Exception:
+        pass
+    return {"seconds": secs}

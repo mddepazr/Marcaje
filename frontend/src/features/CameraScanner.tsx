@@ -113,7 +113,23 @@ export function CameraScanner({
 
   const [identifiedProfile, setIdentifiedProfile] = useState<BiometricProfile | null>(null);
   const [identifiedSimilarity, setIdentifiedSimilarity] = useState<number | null>(null);
-  const [equipCountdown, setEquipCountdown] = useState<number>(15);
+  const [eppTimerSeconds, setEppTimerSeconds] = useState<number>(() => {
+    const saved = Number(localStorage.getItem("epp_phase2_seconds"));
+    return Number.isFinite(saved) && saved >= 5 && saved <= 60 ? saved : 15;
+  });
+  const eppTimerSecondsRef = useRef<number>(eppTimerSeconds);
+  eppTimerSecondsRef.current = eppTimerSeconds;
+  const [equipCountdown, setEquipCountdown] = useState<number>(eppTimerSeconds);
+
+  useEffect(() => {
+    api.getEppTimer()
+      .then((res) => {
+        const secs = Math.max(5, Math.min(60, Number(res.seconds) || 15));
+        setEppTimerSeconds(secs);
+        localStorage.setItem("epp_phase2_seconds", String(secs));
+      })
+      .catch(() => {});
+  }, []);
 
   const [submitting, setSubmitting] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -423,8 +439,9 @@ export function CameraScanner({
         lowOccupancyFramesRef.current = 0;
 
         if (requiresTwoPhase) {
-          phase2DeadlineRef.current = Date.now() + 15000;
-          setEquipCountdown(15);
+          const secs = eppTimerSecondsRef.current;
+          phase2DeadlineRef.current = Date.now() + secs * 1000;
+          setEquipCountdown(secs);
           setStage("PHASE2_EQUIPPING");
           setPillTone("amber");
           setStatusPill(`Hola, ${match.profile.full_name.split(" ")[0]} · Colócate tu EPP`);

@@ -43,7 +43,7 @@ PPE_KEYS = ("helmet", "glasses", "mask", "vest")
 
 # Confianza mínima por tipo de EPP. Antes se aceptaban lentes desde 0.12 en el
 # recorte de la cabeza, lo que hacía que unos ojos normales contaran como "lentes".
-MIN_CONF_FULL = {"helmet": 0.25, "glasses": 0.35, "mask": 0.30, "vest": 0.25}
+MIN_CONF_FULL = {"helmet": 0.25, "glasses": 0.35, "mask": 0.30, "vest": 0.16}
 MIN_CONF_HEAD_CROP = {"helmet": 0.22, "glasses": 0.30, "mask": 0.25}
 # Por encima de esta confianza los lentes se aceptan aunque la prueba del puente
 # nasal no encuentre la montura (p. ej. lentes de seguridad sin puente visible).
@@ -105,8 +105,46 @@ def is_plausible_location(key: str, det_box: list[float], face: list[float] | No
             and 0.60 * fw <= dw <= 3.00 * fw
         )
     if key == "vest":
-        return cy > fy2 and dw >= 0.80 * fw
+        return det_box[3] > fy2 and cy > fy1 + 0.65 * fh and dw >= 0.55 * fw
     return True
+
+
+def detect_high_vis_vest_hsv(pil_image: Image.Image, face: list[float] | None) -> dict | None:
+    """Respaldo por color reflectivo (naranja o amarillo neón) debajo del rostro."""
+    if face is None:
+        return None
+    img_w, img_h = pil_image.size
+    fx1, fy1, fx2, fy2 = face
+    fw = max(1.0, fx2 - fx1)
+    fh = max(1.0, fy2 - fy1)
+
+    rx1 = max(0, int(fx1 - 0.95 * fw))
+    rx2 = min(img_w, int(fx2 + 0.95 * fw))
+    ry1 = max(0, int(fy2 - 0.05 * fh))
+    ry2 = min(img_h, int(fy2 + 1.35 * fh))
+    if rx2 - rx1 < 40 or ry2 - ry1 < 18:
+        return None
+
+    rgb = np.asarray(pil_image.crop((rx1, ry1, rx2, ry2)))
+    if rgb.ndim != 3 or rgb.shape[2] < 3:
+        return None
+    hsv = cv2.cvtColor(rgb[:, :, :3], cv2.COLOR_RGB2HSV)
+    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    # Naranja neón industrial y amarillo-lima neón (alta saturación para descartar piel y ropa común)
+    orange_mask = (h >= 3) & (h <= 22) & (s >= 155) & (v >= 135)
+    lime_mask = (h >= 23) & (h <= 50) & (s >= 135) & (v >= 135)
+
+    best_ratio = max(float(np.mean(orange_mask)), float(np.mean(lime_mask)))
+    if best_ratio < 0.11:
+        return None
+
+    conf = round(min(0.88, 0.55 + best_ratio * 0.9), 4)
+    return {
+        "label": "safety vest",
+        "confidence": conf,
+        "bbox": [float(rx1), float(ry1), float(rx2), float(ry2)],
+    }
 
 
 def glasses_bridge_present(gray: np.ndarray, bridge: list[float]) -> bool | None:
@@ -409,6 +447,12 @@ class PPEDetectorService:
         if glasses is not None and bridge is not None and glasses["confidence"] < GLASSES_STRONG_CONF:
             if glasses_bridge_present(gray_original, bridge) is False:
                 best["glasses"] = None
+
+        # Respaldo de alta visibilidad para chaleco en tomas cercanas.
+        if best["vest"] is None and face is not None:
+            hsv_vest = detect_high_vis_vest_hsv(image, face)
+            if hsv_vest is not None:
+                best["vest"] = hsv_vest
 
         detections = [d for d in best.values() if d is not None]
         for d in detections:
