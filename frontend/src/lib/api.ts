@@ -287,4 +287,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     }),
+
+  resetUserFace: (userId: number) =>
+    request<{ message: string }>(`/admin/users/${userId}/face`, {
+      method: "DELETE",
+    }),
+
+  resetEmployeeFaces: () =>
+    request<{ message: string; cleared: number }>("/admin/faces/employees", {
+      method: "DELETE",
+    }),
 };

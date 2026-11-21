@@ -9,6 +9,7 @@ import {
   Plus,
   Search,
   ShieldCheck,
+  Trash2,
   Users,
 } from "lucide-react";
 import { Badge } from "@astryxdesign/core/Badge";
@@ -82,6 +83,7 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
     selectedRole: JobRole;
   } | null>(null);
   const [pendingStatusToggle, setPendingStatusToggle] = useState<AdminUserItem | null>(null);
+  const [pendingFaceReset, setPendingFaceReset] = useState<"all_employees" | AdminUserItem | null>(null);
   const [applyingAction, setApplyingAction] = useState(false);
 
   const loadAll = async (
@@ -261,6 +263,32 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
         type: "error",
         title: "No se pudo cambiar el puesto",
         message: err instanceof Error ? err.message : "Operación rechazada.",
+      });
+    } finally {
+      setApplyingAction(false);
+    }
+  };
+
+  const confirmFaceReset = async () => {
+    if (!pendingFaceReset) return;
+    setApplyingAction(true);
+    try {
+      const res =
+        pendingFaceReset === "all_employees"
+          ? await api.resetEmployeeFaces()
+          : await api.resetUserFace(pendingFaceReset.id);
+      setPendingFaceReset(null);
+      await loadAll();
+      setToast({
+        type: "success",
+        title: "Rostros eliminados",
+        message: res.message,
+      });
+    } catch (err) {
+      setToast({
+        type: "error",
+        title: "No se pudo borrar el registro facial",
+        message: err instanceof Error ? err.message : "Error inesperado.",
       });
     } finally {
       setApplyingAction(false);
@@ -1056,13 +1084,22 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                     </VStack>
                   </HStack>
 
-                  <Button
-                    label="Nuevo puesto"
-                    variant="primary"
-                    size="sm"
-                    icon={<Plus className="h-4 w-4" />}
-                    onClick={() => setNewRoleModalOpen(true)}
-                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      label="Borrar rostros (solo dejar Admin)"
+                      variant="secondary"
+                      size="sm"
+                      icon={<Trash2 className="h-4 w-4" />}
+                      onClick={() => setPendingFaceReset("all_employees")}
+                    />
+                    <Button
+                      label="Nuevo puesto"
+                      variant="primary"
+                      size="sm"
+                      icon={<Plus className="h-4 w-4" />}
+                      onClick={() => setNewRoleModalOpen(true)}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-3 md:hidden">
@@ -1126,13 +1163,23 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                               }}
                             />
                           </div>
-                          <Button
-                            isDisabled={u.id === user.id}
-                            label={u.is_active ? "Desactivar" : "Activar"}
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => setPendingStatusToggle(u)}
-                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            {u.has_face_enrolled && (
+                              <Button
+                                label="Borrar rostro"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setPendingFaceReset(u)}
+                              />
+                            )}
+                            <Button
+                              isDisabled={u.id === user.id}
+                              label={u.is_active ? "Desactivar" : "Activar"}
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setPendingStatusToggle(u)}
+                            />
+                          </div>
                         </div>
                       </div>
                     );
@@ -1224,13 +1271,23 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
                               />
                             </td>
                             <td className="py-3.5 pl-4 text-right">
-                              <Button
-                                isDisabled={u.id === user.id}
-                                label={u.is_active ? "Desactivar" : "Activar"}
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => setPendingStatusToggle(u)}
-                              />
+                              <div className="flex items-center justify-end gap-2">
+                                {u.has_face_enrolled && (
+                                  <Button
+                                    label="Borrar rostro"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setPendingFaceReset(u)}
+                                  />
+                                )}
+                                <Button
+                                  isDisabled={u.id === user.id}
+                                  label={u.is_active ? "Desactivar" : "Activar"}
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => setPendingStatusToggle(u)}
+                                />
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1376,6 +1433,23 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
         loading={applyingAction}
         onConfirm={confirmRoleAssignment}
         onCancel={() => setPendingRoleChange(null)}
+      />
+
+      <ConfirmModal
+        open={pendingFaceReset !== null}
+        title="Borrar registro biométrico"
+        message={
+          pendingFaceReset === "all_employees"
+            ? "¿Eliminar los rostros registrados de todos los empleados y conservar únicamente el perfil facial del Administrador?"
+            : pendingFaceReset
+            ? `¿Eliminar el rostro registrado de ${pendingFaceReset.full_name}?`
+            : ""
+        }
+        confirmLabel="Sí, borrar rostros"
+        danger
+        loading={applyingAction}
+        onConfirm={confirmFaceReset}
+        onCancel={() => setPendingFaceReset(null)}
       />
 
       <ConfirmModal

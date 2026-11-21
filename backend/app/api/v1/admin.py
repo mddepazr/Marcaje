@@ -446,3 +446,40 @@ def update_user(
         is_active=target.is_active,
         created_at=target.created_at,
     )
+
+
+@router.delete("/users/{user_id}/face")
+def reset_user_face(
+    user_id: int,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado.")
+
+    target.face_descriptor = None
+    target.face_samples = None
+    target.face_enrolled_at = None
+    db.commit()
+    return {"message": f"Registro facial eliminado para {target.full_name}."}
+
+
+@router.delete("/faces/employees")
+def reset_all_employee_faces(
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    employees = db.scalars(select(User).where(User.role != "admin")).all()
+    cleared = 0
+    for emp in employees:
+        if emp.face_descriptor is not None or emp.face_samples is not None:
+            emp.face_descriptor = None
+            emp.face_samples = None
+            emp.face_enrolled_at = None
+            cleared += 1
+    db.commit()
+    return {
+        "message": f"Se eliminaron {cleared} registros faciales de empleados. Solo se conservó el perfil Admin.",
+        "cleared": cleared,
+    }

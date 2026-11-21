@@ -1,12 +1,14 @@
 import * as faceapi from "@vladmandic/face-api";
 import { BiometricProfile } from "./api";
 
-export const FACE_MATCH_THRESHOLD = 0.56;
+export const FACE_MATCH_THRESHOLD = 0.58;
+export const INSTANT_MATCH_THRESHOLD = 0.46;
 export const FACE_AMBIGUITY_MARGIN = 0.04;
-export const ENROLL_MAX_SAMPLE_SPREAD = 0.48;
+export const ENROLL_MAX_SAMPLE_SPREAD = 0.52;
 
 let modelsLoaded = false;
 let loadingPromise: Promise<void> | null = null;
+let inferenceCanvas: HTMLCanvasElement | null = null;
 
 export async function ensureFaceModelsLoaded(): Promise<void> {
   if (modelsLoaded) return;
@@ -51,18 +53,55 @@ export interface FrameAnalysisResult {
 
 type Point = { x: number; y: number };
 
-function computeBridgeBox(positions: Point[] | null): Box | undefined {
+function getScaledVideoCanvas(video: HTMLVideoElement, targetWidth = 320): {
+  canvas: HTMLCanvasElement;
+  scaleX: number;
+  scaleY: number;
+} {
+  if (!inferenceCanvas) {
+    inferenceCanvas = document.createElement("canvas");
+  }
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 480;
+  const w = Math.min(targetWidth, vw);
+  const h = Math.max(180, Math.round((vh / vw) * w));
+
+  if (inferenceCanvas.width !== w || inferenceCanvas.height !== h) {
+    inferenceCanvas.width = w;
+    inferenceCanvas.height = h;
+  }
+  const ctx = inferenceCanvas.getContext("2d", { alpha: false });
+  if (ctx) {
+    ctx.drawImage(video, 0, 0, w, h);
+  }
+  return {
+    canvas: inferenceCanvas,
+    scaleX: vw / w,
+    scaleY: vh / h,
+  };
+}
+
+function scaleBox(box: Box, sx: number, sy: number): Box {
+  return {
+    x: box.x * sx,
+    y: box.y * sy,
+    width: box.width * sx,
+    height: box.height * sy,
+  };
+}
+
+function computeBridgeBox(positions: Point[] | null, sx = 1, sy = 1): Box | undefined {
   if (!positions || positions.length < 68) return undefined;
   const innerLeft = positions[39];
   const innerRight = positions[42];
   const bridgeTop = positions[27];
   const bridgeLow = positions[29];
   const eyeGap = innerRight.x - innerLeft.x;
-  if (eyeGap < 6) return undefined;
+  if (eyeGap < 4) return undefined;
   const y1 = bridgeTop.y - eyeGap * 0.25;
   const y2 = bridgeLow.y;
-  if (y2 - y1 < 6) return undefined;
-  return { x: innerLeft.x, y: y1, width: eyeGap, height: y2 - y1 };
+  if (y2 - y1 < 4) return undefined;
+  return scaleBox({ x: innerLeft.x, y: y1, width: eyeGap, height: y2 - y1 }, sx, sy);
 }
 
 function pointDist(a: Point, b: Point): number {
@@ -83,14 +122,14 @@ function evaluateFaceQuality(
   score: number,
   positions: Point[] | null,
   frameWidth: number,
-  minScore = 0.45
+  minScore = 0.4
 ): FaceQuality {
-  const minFaceWidth = Math.max(70, frameWidth * 0.09);
+  const minFaceWidth = Math.max(44, frameWidth * 0.14);
   if (box.width < minFaceWidth) {
     return { ok: false, reason: "Acércate un poco más a la cámara" };
   }
   if (score < minScore) {
-    return { ok: false, reason: "Rostro poco nítido · Mejora la iluminación" };
+    return { ok: false, reason: "Rostro poco nítido · Mejora la luz" };
   }
   if (positions && positions.length >= 68) {
     const leftEyeOuter = positions[36];
@@ -99,14 +138,14 @@ function evaluateFaceQuality(
     const eyeSpan = rightEyeOuter.x - leftEyeOuter.x;
     if (Math.abs(eyeSpan) > 1) {
       const yawRatio = (noseTip.x - leftEyeOuter.x) / eyeSpan;
-      if (yawRatio < 0.24 || yawRatio > 0.76) {
+      if (yawRatio < 0.2 || yawRatio > 0.8) {
         return { ok: false, reason: "Mira de frente a la cámara" };
       }
     }
     const rollDeg =
       (Math.atan2(rightEyeOuter.y - leftEyeOuter.y, rightEyeOuter.x - leftEyeOuter.x) * 180) /
       Math.PI;
-    if (Math.abs(rollDeg) > 24) {
+    if (Math.abs(rollDeg) > 26) {
       return { ok: false, reason: "Endereza la cabeza" };
     }
   }
@@ -130,18 +169,19 @@ export async function analyzeVideoFaces(
     return { faceCount: 0, primaryFace: null };
   }
 
-  const tinyOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.32 });
+  const { canvas, scaleX, scaleY } = getScaledVideoCanvas(video, 320);
+  const tinyOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.34 });
 
   if (computeDescriptor) {
-    const ssdOptions = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.42, maxResults: 5 });
+    const ssdOptions = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4, maxResults: 4 });
     let detections = await faceapi
-      .detectAllFaces(video, ssdOptions)
+      .detectAllFaces(canvas, ssdOptions)
       .withFaceLandmarks()
       .withFaceDescriptors();
 
     if (detections.length === 0) {
       detections = await faceapi
-        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 }))
+        .detectAllFaces(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 256, scoreThreshold: 0.32 }))
         .withFaceLandmarks()
         .withFaceDescriptors();
     }
@@ -156,24 +196,24 @@ export async function analyzeVideoFaces(
     return {
       faceCount: detections.length,
       primaryFace: {
-        box: { x: box.x, y: box.y, width: box.width, height: box.height },
+        box: scaleBox({ x: box.x, y: box.y, width: box.width, height: box.height }, scaleX, scaleY),
         ear: (leftEar + rightEar) / 2,
-        descriptor: Array.from(main.descriptor),
+        descriptor: l2Normalize(Array.from(main.descriptor)),
         score: main.detection.score,
-        bridgeBox: computeBridgeBox(main.landmarks.positions),
+        bridgeBox: computeBridgeBox(main.landmarks.positions, scaleX, scaleY),
         quality: evaluateFaceQuality(
           box,
           main.detection.score,
           main.landmarks.positions,
-          video.videoWidth,
-          0.48
+          canvas.width,
+          0.42
         ),
       },
     };
   }
 
   if (withLandmarks) {
-    const detections = await faceapi.detectAllFaces(video, tinyOptions).withFaceLandmarks();
+    const detections = await faceapi.detectAllFaces(canvas, tinyOptions).withFaceLandmarks();
     if (detections.length === 0) return { faceCount: 0, primaryFace: null };
 
     const main = largestFirst(detections)[0];
@@ -184,23 +224,23 @@ export async function analyzeVideoFaces(
     return {
       faceCount: detections.length,
       primaryFace: {
-        box: { x: box.x, y: box.y, width: box.width, height: box.height },
+        box: scaleBox({ x: box.x, y: box.y, width: box.width, height: box.height }, scaleX, scaleY),
         ear: (leftEar + rightEar) / 2,
         descriptor: [],
         score: main.detection.score,
-        bridgeBox: computeBridgeBox(main.landmarks.positions),
+        bridgeBox: computeBridgeBox(main.landmarks.positions, scaleX, scaleY),
         quality: evaluateFaceQuality(
           box,
           main.detection.score,
           main.landmarks.positions,
-          video.videoWidth,
-          0.40
+          canvas.width,
+          0.36
         ),
       },
     };
   }
 
-  const detections = await faceapi.detectAllFaces(video, tinyOptions);
+  const detections = await faceapi.detectAllFaces(canvas, tinyOptions);
   if (detections.length === 0) return { faceCount: 0, primaryFace: null };
   const main = [...detections].sort(
     (a, b) => b.box.width * b.box.height - a.box.width * a.box.height
@@ -208,7 +248,7 @@ export async function analyzeVideoFaces(
   return {
     faceCount: detections.length,
     primaryFace: {
-      box: { x: main.box.x, y: main.box.y, width: main.box.width, height: main.box.height },
+      box: scaleBox({ x: main.box.x, y: main.box.y, width: main.box.width, height: main.box.height }, scaleX, scaleY),
       ear: 0.3,
       descriptor: [],
       score: main.score,
@@ -229,13 +269,13 @@ export async function extractDescriptorFromImageFile(file: File): Promise<number
     });
 
     let detections = await faceapi
-      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.45, maxResults: 5 }))
+      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.42, maxResults: 4 }))
       .withFaceLandmarks()
       .withFaceDescriptors();
 
     if (detections.length === 0) {
       detections = await faceapi
-        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.3 }))
+        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.3 }))
         .withFaceLandmarks()
         .withFaceDescriptors();
     }
@@ -253,7 +293,7 @@ export async function extractDescriptorFromImageFile(file: File): Promise<number
       main.detection.score,
       main.landmarks.positions,
       img.naturalWidth || img.width,
-      0.45
+      0.4
     );
     if (!quality.ok) {
       throw new Error(
@@ -261,17 +301,27 @@ export async function extractDescriptorFromImageFile(file: File): Promise<number
       );
     }
 
-    return Array.from(main.descriptor);
+    return l2Normalize(Array.from(main.descriptor));
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
 }
 
+export function l2Normalize(vec: number[]): number[] {
+  let normSq = 0;
+  for (let i = 0; i < vec.length; i++) normSq += vec[i] * vec[i];
+  const norm = Math.sqrt(normSq);
+  if (norm <= 1e-8) return vec;
+  return vec.map((v) => v / norm);
+}
+
 export function descriptorDistance(a: number[], b: number[]): number {
   if (a.length !== 128 || b.length !== 128) return Number.POSITIVE_INFINITY;
+  const na = l2Normalize(a);
+  const nb = l2Normalize(b);
   let sumSq = 0;
   for (let i = 0; i < 128; i++) {
-    const diff = a[i] - b[i];
+    const diff = na[i] - nb[i];
     sumSq += diff * diff;
   }
   return Math.sqrt(sumSq);
@@ -330,10 +380,10 @@ export function averageDescriptors(vectors: number[][]): number[] {
   if (vectors.length === 0) return [];
   const avg = new Array<number>(128).fill(0);
   for (const vec of vectors) {
-    for (let i = 0; i < 128; i++) avg[i] += vec[i];
+    const normVec = l2Normalize(vec);
+    for (let i = 0; i < 128; i++) avg[i] += normVec[i];
   }
-  for (let i = 0; i < 128; i++) avg[i] /= vectors.length;
-  return avg;
+  return l2Normalize(avg);
 }
 
 export function maxPairwiseDistance(vectors: number[][]): number {
@@ -350,8 +400,8 @@ export function sampleTorsoHeadSignature(
   video: HTMLVideoElement,
   scratchCanvas: HTMLCanvasElement
 ): { occupancy: number; centerX: number } {
-  const w = 48;
-  const h = 36;
+  const w = 32;
+  const h = 24;
   scratchCanvas.width = w;
   scratchCanvas.height = h;
   const ctx = scratchCanvas.getContext("2d", { willReadFrequently: true });
@@ -364,7 +414,7 @@ export function sampleTorsoHeadSignature(
   let bgG = 0;
   let bgB = 0;
   let bgSamples = 0;
-  for (let y = 0; y < 6; y++) {
+  for (let y = 0; y < 4; y++) {
     for (const x of [0, 1, w - 2, w - 1]) {
       const idx = (y * w + x) * 4;
       bgR += data[idx];
@@ -381,15 +431,15 @@ export function sampleTorsoHeadSignature(
   let weightedX = 0;
   let totalChecked = 0;
 
-  for (let y = 5; y < h; y++) {
-    for (let x = 8; x < w - 8; x++) {
+  for (let y = 4; y < h; y++) {
+    for (let x = 5; x < w - 5; x++) {
       const idx = (y * w + x) * 4;
       const diff =
         Math.abs(data[idx] - bgR) +
         Math.abs(data[idx + 1] - bgG) +
         Math.abs(data[idx + 2] - bgB);
       totalChecked++;
-      if (diff > 50) {
+      if (diff > 45) {
         activePixels++;
         weightedX += x / w;
       }

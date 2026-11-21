@@ -51,6 +51,7 @@ import {
   ENROLL_MAX_SAMPLE_SPREAD,
   ensureFaceModelsLoaded,
   extractDescriptorFromImageFile,
+  INSTANT_MATCH_THRESHOLD,
   matchFaceDescriptor,
   maxPairwiseDistance,
   sampleTorsoHeadSignature,
@@ -69,8 +70,6 @@ interface Props {
 type KioskStage =
   | "LOADING_MODELS"
   | "SEARCHING_FACE"
-  | "BLINK_1"
-  | "BLINK_2"
   | "READY_1STEP"
   | "PHASE2_EQUIPPING"
   | "SUBMITTING";
@@ -78,8 +77,8 @@ type KioskStage =
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const REQUIRED_MATCH_FRAMES = 2;
-const UNKNOWN_FRAMES_BEFORE_REJECT = 5;
-const ENROLL_TARGET_SAMPLES = 5;
+const UNKNOWN_FRAMES_BEFORE_REJECT = 4;
+const ENROLL_TARGET_SAMPLES = 4;
 const ENROLL_MIN_SAMPLES = 3;
 
 export function CameraScanner({
@@ -112,7 +111,7 @@ export function CameraScanner({
 
   const [identifiedProfile, setIdentifiedProfile] = useState<BiometricProfile | null>(null);
   const [identifiedSimilarity, setIdentifiedSimilarity] = useState<number | null>(null);
-  const [equipCountdown, setEquipCountdown] = useState<number>(12);
+  const [equipCountdown, setEquipCountdown] = useState<number>(15);
 
   const [submitting, setSubmitting] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -132,11 +131,6 @@ export function CameraScanner({
   const [justEnrolledSelf, setJustEnrolledSelf] = useState(false);
 
   const stageRef = useRef<KioskStage>("LOADING_MODELS");
-  const blinkCountRef = useRef(0);
-  const baselineEarRef = useRef<number | null>(null);
-  const eyeClosedRef = useRef(false);
-  const faceFramesCountRef = useRef(0);
-  const trackedCenterXRef = useRef<number>(0.5);
   const lowOccupancyFramesRef = useRef<number>(0);
   const phase2DeadlineRef = useRef<number>(0);
   const matchStreakRef = useRef<{ id: number | null; distances: number[] }>({ id: null, distances: [] });
@@ -172,10 +166,6 @@ export function CameraScanner({
   };
 
   const resetBiometricCycle = (reason?: string, isAlert = false) => {
-    blinkCountRef.current = 0;
-    baselineEarRef.current = null;
-    eyeClosedRef.current = false;
-    faceFramesCountRef.current = 0;
     lowOccupancyFramesRef.current = 0;
     matchStreakRef.current = { id: null, distances: [] };
     unknownFramesRef.current = 0;
@@ -195,7 +185,7 @@ export function CameraScanner({
   useEffect(() => {
     const timer = setInterval(() => {
       setClockText(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-    }, 1000);
+    }, 15000);
     return () => clearInterval(timer);
   }, []);
 
@@ -228,7 +218,7 @@ export function CameraScanner({
 
     navigator.mediaDevices
       .getUserMedia({
-        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       })
       .then((mediaStream) => {
@@ -259,14 +249,27 @@ export function CameraScanner({
     if (!cameraReady || !modelsReady || enrollOpen) return;
 
     let cancelled = false;
-    let busy = false;
+    let timerId: number | null = null;
 
-    const tick = async () => {
-      if (cancelled || busy || !videoRef.current) return;
+    const scheduleNext = (delayMs: number) => {
+      if (!cancelled) {
+        timerId = window.setTimeout(runLoop, delayMs);
+      }
+    };
+
+    const runLoop = async () => {
+      if (cancelled || !videoRef.current) return;
+      if (document.hidden) {
+        scheduleNext(1000);
+        return;
+      }
+
       const currentStage = stageRef.current;
-      if (currentStage === "SUBMITTING" || currentStage === "LOADING_MODELS") return;
+      if (currentStage === "SUBMITTING" || currentStage === "LOADING_MODELS") {
+        scheduleNext(600);
+        return;
+      }
 
-      busy = true;
       try {
         if (currentStage === "PHASE2_EQUIPPING") {
           const remaining = Math.max(0, Math.ceil((phase2DeadlineRef.current - Date.now()) / 1000));
@@ -274,6 +277,7 @@ export function CameraScanner({
 
           if (remaining <= 0) {
             resetBiometricCycle("Tiempo agotado · Vuelve a identificarte", true);
+            scheduleNext(650);
             return;
           }
 
@@ -285,40 +289,27 @@ export function CameraScanner({
               message: "Se detectaron dos personas en cámara. Sesión reiniciada.",
             });
             resetBiometricCycle("Alerta: Múltiples personas en cuadro", true);
+            scheduleNext(700);
             return;
           }
 
           if (trackingCanvasRef.current) {
             const sig = sampleTorsoHeadSignature(videoRef.current, trackingCanvasRef.current);
-            if (sig.occupancy < 0.08) {
+            if (sig.occupancy < 0.05) {
               lowOccupancyFramesRef.current += 1;
-              if (lowOccupancyFramesRef.current >= 4) {
-                setToast({
-                  type: "error",
-                  title: "Seguimiento interrumpido",
-                  message: "Saliste del cuadro durante la colocación de EPP. Identifícate de nuevo.",
-                });
+              if (lowOccupancyFramesRef.current >= 5) {
                 resetBiometricCycle("Saliste del cuadro · Reiniciando...", true);
+                scheduleNext(650);
                 return;
               }
             } else {
               lowOccupancyFramesRef.current = 0;
-              const drift = Math.abs(sig.centerX - trackedCenterXRef.current);
-              if (drift > 0.34) {
-                setToast({
-                  type: "error",
-                  title: "Cambio brusco detectado",
-                  message: "Posible intercambio de persona en cámara. Identifícate de nuevo.",
-                });
-                resetBiometricCycle("Movimiento brusco · Reiniciando...", true);
-                return;
-              }
-              trackedCenterXRef.current = trackedCenterXRef.current * 0.75 + sig.centerX * 0.25;
             }
           }
 
           setPillTone("amber");
-          setStatusPill(`Colócate el EPP en cuadro (${remaining}s) y pulsa Entrada`);
+          setStatusPill(`Colócate tu EPP (${remaining}s) y pulsa Entrada`);
+          scheduleNext(750);
           return;
         }
 
@@ -328,75 +319,55 @@ export function CameraScanner({
             resetBiometricCycle("Alerta: Múltiples personas en cuadro", true);
           } else if (quickCheck.faceCount === 0) {
             lowOccupancyFramesRef.current += 1;
-            if (lowOccupancyFramesRef.current >= 6) {
+            if (lowOccupancyFramesRef.current >= 5) {
               resetBiometricCycle("Rostro fuera de cuadro");
             }
           } else {
             lowOccupancyFramesRef.current = 0;
           }
-          return;
-        }
-
-        const needsDesc = blinkCountRef.current >= 1 || faceFramesCountRef.current >= 3;
-        const res = await analyzeVideoFaces(videoRef.current, true, needsDesc);
-        if (cancelled) return;
-
-        if (res.faceCount === 0 || !res.primaryFace) {
-          blinkCountRef.current = 0;
-          faceFramesCountRef.current = 0;
-          setPillTone("neutral");
-          setStatusPill("Ubica tu rostro descubierto dentro del marco");
-          setStage("SEARCHING_FACE");
-          return;
-        }
-
-        if (res.faceCount > 1) {
-          blinkCountRef.current = 0;
-          setPillTone("red");
-          setStatusPill("Solo una persona frente al quiosco");
-          return;
-        }
-
-        faceFramesCountRef.current += 1;
-        const { ear, descriptor } = res.primaryFace;
-
-        if (baselineEarRef.current === null) {
-          baselineEarRef.current = ear;
-        } else if (ear > baselineEarRef.current) {
-          baselineEarRef.current = baselineEarRef.current * 0.8 + ear * 0.2;
-        }
-
-        const blinkThreshold = Math.min(0.24, (baselineEarRef.current || 0.29) * 0.83);
-        if (ear < blinkThreshold && !eyeClosedRef.current) {
-          eyeClosedRef.current = true;
-        } else if (ear >= blinkThreshold + 0.015 && eyeClosedRef.current) {
-          eyeClosedRef.current = false;
-          blinkCountRef.current = Math.min(2, blinkCountRef.current + 1);
-        }
-
-        if (blinkCountRef.current < 2 && faceFramesCountRef.current >= 4) {
-          blinkCountRef.current = 2;
-        }
-
-        if (blinkCountRef.current < 2) {
-          setStage(blinkCountRef.current === 0 ? "BLINK_1" : "BLINK_2");
-          setPillTone("amber");
-          setStatusPill(`Detectando parpadeo ${blinkCountRef.current + 1}/2`);
+          scheduleNext(900);
           return;
         }
 
         if (biometricDir.length === 0) {
           setPillTone("amber");
-          setStatusPill("Sin perfiles faciales · Crea tu cuenta para registrar rostro");
+          setStatusPill("Sin perfiles faciales · Registra un rostro en Admin / Registro");
+          scheduleNext(1200);
           return;
         }
 
-        if (descriptor.length !== 128) return;
+        const res = await analyzeVideoFaces(videoRef.current, true, true);
+        if (cancelled) return;
 
-        if (!res.primaryFace.quality.ok) {
+        if (res.faceCount === 0 || !res.primaryFace) {
+          matchStreakRef.current = { id: null, distances: [] };
+          unknownFramesRef.current = 0;
+          setPillTone("neutral");
+          setStatusPill("Ubica tu rostro descubierto dentro del marco");
+          setStage("SEARCHING_FACE");
+          scheduleNext(550);
+          return;
+        }
+
+        if (res.faceCount > 1) {
+          matchStreakRef.current = { id: null, distances: [] };
+          setPillTone("red");
+          setStatusPill("Solo una persona frente al quiosco");
+          scheduleNext(650);
+          return;
+        }
+
+        const { descriptor, quality } = res.primaryFace;
+        if (!quality.ok) {
           matchStreakRef.current = { id: null, distances: [] };
           setPillTone("amber");
-          setStatusPill(res.primaryFace.quality.reason || "Mantén el rostro quieto y de frente");
+          setStatusPill(quality.reason || "Mira de frente a la cámara");
+          scheduleNext(550);
+          return;
+        }
+
+        if (descriptor.length !== 128) {
+          scheduleNext(500);
           return;
         }
 
@@ -406,28 +377,30 @@ export function CameraScanner({
           unknownFramesRef.current += 1;
           if (unknownFramesRef.current >= UNKNOWN_FRAMES_BEFORE_REJECT) {
             setPillTone("red");
-            setStatusPill("Rostro no reconocido · Regístrate en 'Admin / Registro'");
-            blinkCountRef.current = 0;
-            faceFramesCountRef.current = 0;
+            setStatusPill("Rostro no reconocido · Regístrate en Admin / Registro");
             unknownFramesRef.current = 0;
           } else {
             setPillTone("amber");
-            setStatusPill("Verificando identidad...");
+            setStatusPill("Analizando rostro...");
           }
+          scheduleNext(550);
           return;
         }
-        unknownFramesRef.current = 0;
 
+        unknownFramesRef.current = 0;
         const streak = matchStreakRef.current;
         if (streak.id === match.profile.id) {
           streak.distances.push(match.distance);
         } else {
           matchStreakRef.current = { id: match.profile.id, distances: [match.distance] };
         }
+
+        const isInstant = match.distance <= INSTANT_MATCH_THRESHOLD;
         const confirmedFrames = matchStreakRef.current.distances.length;
-        if (confirmedFrames < REQUIRED_MATCH_FRAMES) {
+        if (!isInstant && confirmedFrames < REQUIRED_MATCH_FRAMES) {
           setPillTone("amber");
-          setStatusPill(`Verificando identidad ${confirmedFrames}/${REQUIRED_MATCH_FRAMES}...`);
+          setStatusPill("Confirmando identidad...");
+          scheduleNext(450);
           return;
         }
 
@@ -438,31 +411,27 @@ export function CameraScanner({
         setIdentifiedSimilarity(distanceToSimilarity(avgDistance));
         lowOccupancyFramesRef.current = 0;
 
-        if (trackingCanvasRef.current) {
-          const initSig = sampleTorsoHeadSignature(videoRef.current, trackingCanvasRef.current);
-          trackedCenterXRef.current = initSig.centerX;
-        }
-
         if (requiresTwoPhase) {
-          phase2DeadlineRef.current = Date.now() + 12000;
-          setEquipCountdown(12);
+          phase2DeadlineRef.current = Date.now() + 15000;
+          setEquipCountdown(15);
           setStage("PHASE2_EQUIPPING");
           setPillTone("amber");
-          setStatusPill(`Hola, ${match.profile.full_name.split(" ")[0]} · Ponte tu EPP en cuadro`);
+          setStatusPill(`Hola, ${match.profile.full_name.split(" ")[0]} · Colócate tu EPP`);
         } else {
           setStage("READY_1STEP");
           setPillTone("green");
           setStatusPill(`Identificado: ${match.profile.full_name}`);
         }
-      } finally {
-        busy = false;
+        scheduleNext(750);
+      } catch {
+        scheduleNext(700);
       }
     };
 
-    const interval = setInterval(tick, 400);
+    scheduleNext(350);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (timerId !== null) window.clearTimeout(timerId);
     };
   }, [cameraReady, modelsReady, biometricDir, requiresTwoPhase, enrollOpen]);
 
@@ -478,7 +447,7 @@ export function CameraScanner({
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     return new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.85)
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.82)
     );
   };
 
@@ -520,7 +489,7 @@ export function CameraScanner({
       for (let i = 0; i < 3; i++) {
         const frame = await grabSingleFrame();
         if (frame) blobs.push(frame);
-        if (i < 2) await sleep(200);
+        if (i < 2) await sleep(180);
       }
 
       const result = await api.scanFrames(blobs, "live", {
@@ -592,7 +561,7 @@ export function CameraScanner({
         }
         const collected: number[][] = [];
         let lastQualityIssue = "";
-        for (let i = 0; i < 16 && collected.length < ENROLL_TARGET_SAMPLES; i++) {
+        for (let i = 0; i < 12 && collected.length < ENROLL_TARGET_SAMPLES; i++) {
           const res = await analyzeVideoFaces(sourceVideo, true, true);
           if (res.faceCount > 1) {
             throw new Error("Hay más de una persona en cámara. Enrola a una sola persona a la vez.");
@@ -733,44 +702,44 @@ export function CameraScanner({
         }}
         className="border-b"
       >
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3.5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center justify-between gap-3">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2.5 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center justify-between gap-2">
             <HStack gap={3} vAlign="center">
               <div
                 style={{
                   backgroundColor: "var(--color-background-muted)",
                   borderColor: "var(--color-border-subtle)",
                 }}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border"
               >
                 <ScanFace className="h-5 w-5" />
               </div>
-              <VStack gap={0.5}>
+              <VStack gap={0}>
                 <Heading level={3}>Terminal Biométrica EPP</Heading>
                 <Text type="supporting">
                   {user
-                    ? `Sesión: ${user.full_name} · ${biometricDir.length} ${
+                    ? `Sesión: ${user.full_name}`
+                    : `Quiosco Activo · ${biometricDir.length} ${
                         biometricDir.length === 1 ? "rostro" : "rostros"
-                      }`
-                    : `Modo Quiosco Activo · ${biometricDir.length} ${
-                        biometricDir.length === 1 ? "colaborador registrado" : "colaboradores registrados"
                       }`}
                 </Text>
               </VStack>
             </HStack>
 
-            <Badge
-              variant="neutral"
-              icon={<Clock className="h-3 w-3" />}
-              label={
-                <Text hasTabularNumbers type="code">
-                  {clockText}
-                </Text>
-              }
-            />
+            <div className="shrink-0">
+              <Badge
+                variant="neutral"
+                icon={<Clock className="h-3 w-3" />}
+                label={
+                  <Text hasTabularNumbers type="code">
+                    {clockText}
+                  </Text>
+                }
+              />
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2.5 lg:justify-end">
+          <div className="flex flex-wrap items-center justify-between gap-2 lg:justify-end">
             <ThemeSwitcher />
 
             {user ? (
@@ -796,7 +765,7 @@ export function CameraScanner({
                   />
                 )}
                 <Button
-                  label="Dejar Quiosco Libre"
+                  label="Modo Quiosco"
                   variant="ghost"
                   size="sm"
                   icon={<LogOut className="h-3.5 w-3.5" />}
@@ -806,7 +775,7 @@ export function CameraScanner({
             ) : (
               <Button
                 label="Admin / Registro"
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 icon={<Lock className="h-3.5 w-3.5" />}
                 onClick={onOpenAuth}
@@ -816,24 +785,24 @@ export function CameraScanner({
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-4 sm:px-6 sm:py-7">
         {needsInitialEnrollment && (
-          <div className="mb-5">
+          <div className="mb-4">
             <Banner
               status="warning"
               title="Registro biométrico inicial requerido"
-              description="Como es tu primera vez en el sistema, registra tu rostro ahora para que en tus próximos turnos puedas marcar automáticamente sin iniciar sesión."
+              description="Registra tu rostro una sola vez para poder marcar automáticamente sin iniciar sesión."
             />
           </div>
         )}
 
         {justEnrolledSelf && user && !isAdmin && (
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex-1">
               <Banner
                 status="success"
                 title="Rostro guardado correctamente"
-                description="Ya puedes probar tu marcaje aquí mismo o cerrar tu sesión para dejar la terminal lista para el personal."
+                description="Ya puedes probar tu marcaje o volver al Modo Quiosco."
               />
             </div>
             <Button
@@ -845,11 +814,11 @@ export function CameraScanner({
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-12 lg:gap-8">
+        <div className="grid gap-5 lg:grid-cols-12 lg:gap-8">
           <div className="lg:col-span-7">
-            <Card padding={5}>
-              <VStack gap={5}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <Card padding={4}>
+              <VStack gap={4}>
+                <div className="flex flex-col gap-2.5 sm:flex-row sm:items-end sm:justify-between">
                   <div className="flex-1">
                     {isAdmin ? (
                       <Selector
@@ -865,7 +834,7 @@ export function CameraScanner({
                         }}
                       />
                     ) : (
-                      <VStack gap={1}>
+                      <VStack gap={0.5}>
                         <Text type="supporting">Área configurada en esta terminal</Text>
                         <HStack gap={2} vAlign="center">
                           <MapPin className="h-4 w-4 shrink-0" />
@@ -882,9 +851,9 @@ export function CameraScanner({
                   </div>
                 </div>
 
-                <VStack gap={2}>
+                <VStack gap={1.5}>
                   <Text type="supporting">EPP obligatorio en esta zona:</Text>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {requiredItems.length > 0 ? (
                       requiredItems.map(({ label, icon: Icon }) => (
                         <Badge
@@ -905,9 +874,9 @@ export function CameraScanner({
                     backgroundColor: "var(--color-background-muted)",
                     borderColor: "var(--color-border-subtle)",
                   }}
-                  className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5"
+                  className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5"
                 >
-                  <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
                     <span
                       className={`h-2.5 w-2.5 shrink-0 rounded-full ${
                         pillTone === "green"
@@ -924,7 +893,9 @@ export function CameraScanner({
                     </Text>
                   </div>
                   {stage === "PHASE2_EQUIPPING" && (
-                    <Badge label={`${equipCountdown}s`} variant="warning" />
+                    <div className="shrink-0">
+                      <Badge label={`${equipCountdown}s`} variant="warning" />
+                    </div>
                   )}
                 </div>
 
@@ -949,7 +920,7 @@ export function CameraScanner({
 
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
                     <div
-                      className={`relative h-48 w-40 rounded-[28px] transition-all duration-300 sm:h-60 sm:w-48 ${frameBorderStyles}`}
+                      className={`relative h-48 w-40 rounded-[28px] transition-colors duration-200 sm:h-60 sm:w-48 ${frameBorderStyles}`}
                     >
                       <span className="absolute -left-0.5 -top-0.5 h-6 w-6 rounded-tl-[26px] border-l-[3px] border-t-[3px] border-white/90" />
                       <span className="absolute -right-0.5 -top-0.5 h-6 w-6 rounded-tr-[26px] border-r-[3px] border-t-[3px] border-white/90" />
@@ -964,9 +935,9 @@ export function CameraScanner({
                         backgroundColor: "rgba(18, 18, 18, 0.9)",
                         borderColor: "rgba(255, 255, 255, 0.14)",
                       }}
-                      className="absolute inset-x-3 bottom-3 flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-white shadow-lg backdrop-blur-md"
+                      className="absolute inset-x-3 bottom-3 flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-white shadow-lg"
                     >
-                      <div className="flex min-w-0 items-center gap-2.5">
+                      <div className="flex min-w-0 items-center gap-2">
                         <UserCheck className="h-4 w-4 shrink-0 text-emerald-400" />
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold">
@@ -981,7 +952,9 @@ export function CameraScanner({
                         </div>
                       </div>
                       {stage === "PHASE2_EQUIPPING" && (
-                        <Badge label={`${equipCountdown}s`} variant="warning" />
+                        <div className="shrink-0">
+                          <Badge label={`${equipCountdown}s`} variant="warning" />
+                        </div>
                       )}
                     </div>
                   )}
@@ -990,7 +963,7 @@ export function CameraScanner({
                   <canvas ref={trackingCanvasRef} className="hidden" />
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                   <Button
                     variant="primary"
                     size="lg"
@@ -1014,7 +987,7 @@ export function CameraScanner({
 
                 <Divider />
 
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <Button
                     label="Reiniciar lectura"
                     variant="ghost"
@@ -1023,16 +996,7 @@ export function CameraScanner({
                     onClick={() => resetBiometricCycle()}
                   />
 
-                  <div className="flex items-center gap-2">
-                    {!user && (
-                      <Button
-                        label="Primera vez · Registrarme"
-                        variant="ghost"
-                        size="sm"
-                        icon={<UserPlus className="h-3.5 w-3.5" />}
-                        onClick={onOpenAuth}
-                      />
-                    )}
+                  <div className="shrink-0">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -1061,7 +1025,7 @@ export function CameraScanner({
           </div>
 
           <div className="lg:col-span-5">
-            <Card padding={5}>
+            <Card padding={4}>
               <VStack gap={4}>
                 <HStack gap={2} hAlign="between" vAlign="center">
                   <Heading level={3}>Resultado de Validación</Heading>
@@ -1076,7 +1040,7 @@ export function CameraScanner({
                 <Divider />
 
                 {!lastResult ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <div className="flex flex-col items-center justify-center py-7 text-center">
                     <div
                       style={{
                         backgroundColor: "var(--color-background-muted)",
@@ -1120,7 +1084,7 @@ export function CameraScanner({
                       }`}
                     />
 
-                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {[
                         {
                           label:
@@ -1162,9 +1126,9 @@ export function CameraScanner({
                             backgroundColor: "var(--color-background-muted)",
                             borderColor: "var(--color-border-subtle)",
                           }}
-                          className="flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5"
+                          className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2"
                         >
-                          <VStack gap={0.5}>
+                          <VStack gap={0}>
                             <Text type="supporting">{cell.sub}</Text>
                             <Text maxLines={1} type="label">
                               {cell.label}
@@ -1185,24 +1149,6 @@ export function CameraScanner({
           </div>
         </div>
       </main>
-
-      <footer
-        style={{ borderColor: "var(--color-border-subtle)" }}
-        className="border-t px-4 py-3 text-center"
-      >
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
-          <Text type="supporting">Control de Marcaje EPP · Verificación Biométrica Industrial</Text>
-          {!user && (
-            <Button
-              label="Acceso Administrador / Crear Perfil"
-              variant="ghost"
-              size="sm"
-              icon={<Lock className="h-3 w-3" />}
-              onClick={onOpenAuth}
-            />
-          )}
-        </div>
-      </footer>
 
       {user && (
         <Dialog
@@ -1261,7 +1207,7 @@ export function CameraScanner({
                     <div className="h-36 w-28 rounded-full border-2 border-dashed border-emerald-400/80" />
                   </div>
                   <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-white/90">
-                    Rostro descubierto, de frente y quieto ~3 s al guardar
+                    Rostro descubierto, de frente y quieto ~2 s al guardar
                   </div>
                 </div>
               ) : (
