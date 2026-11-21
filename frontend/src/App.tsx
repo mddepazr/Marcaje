@@ -243,7 +243,10 @@ export function App() {
         <AdminDashboard
           user={user}
           onLogout={handleLogout}
-          onSwitchToScanner={() => setActiveView("scanner")}
+          onSwitchToScanner={() => {
+            api.me().then(setUser).catch(() => {});
+            setActiveView("scanner");
+          }}
         />
       ) : (
         <CameraScanner

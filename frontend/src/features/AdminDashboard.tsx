@@ -83,7 +83,7 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
     selectedRole: JobRole;
   } | null>(null);
   const [pendingStatusToggle, setPendingStatusToggle] = useState<AdminUserItem | null>(null);
-  const [pendingFaceReset, setPendingFaceReset] = useState<"all_employees" | AdminUserItem | null>(null);
+  const [pendingFaceReset, setPendingFaceReset] = useState<"all_employees" | "all_including_admin" | AdminUserItem | null>(null);
   const [applyingAction, setApplyingAction] = useState(false);
 
   const loadAll = async (
@@ -274,7 +274,9 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
     setApplyingAction(true);
     try {
       const res =
-        pendingFaceReset === "all_employees"
+        pendingFaceReset === "all_including_admin"
+          ? await api.resetAllFaces()
+          : pendingFaceReset === "all_employees"
           ? await api.resetEmployeeFaces()
           : await api.resetUserFace(pendingFaceReset.id);
       setPendingFaceReset(null);
@@ -1086,10 +1088,16 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
 
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
-                      label="Borrar rostros (solo dejar Admin)"
+                      label="Borrar TODOS los rostros"
                       variant="secondary"
                       size="sm"
                       icon={<Trash2 className="h-4 w-4" />}
+                      onClick={() => setPendingFaceReset("all_including_admin")}
+                    />
+                    <Button
+                      label="Borrar solo empleados"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setPendingFaceReset("all_employees")}
                     />
                     <Button
@@ -1439,7 +1447,9 @@ export function AdminDashboard({ user, onLogout, onSwitchToScanner }: Props) {
         open={pendingFaceReset !== null}
         title="Borrar registro biométrico"
         message={
-          pendingFaceReset === "all_employees"
+          pendingFaceReset === "all_including_admin"
+            ? "¿Eliminar TODOS los registros faciales del sistema (incluyendo el del Administrador) para empezar desde cero?"
+            : pendingFaceReset === "all_employees"
             ? "¿Eliminar los rostros registrados de todos los empleados y conservar únicamente el perfil facial del Administrador?"
             : pendingFaceReset
             ? `¿Eliminar el rostro registrado de ${pendingFaceReset.full_name}?`

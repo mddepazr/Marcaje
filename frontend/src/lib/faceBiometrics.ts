@@ -1,8 +1,8 @@
 import * as faceapi from "@vladmandic/face-api";
 import { BiometricProfile } from "./api";
 
-export const FACE_MATCH_THRESHOLD = 0.38;
-export const INSTANT_MATCH_THRESHOLD = 0.28;
+export const FACE_MATCH_THRESHOLD = 0.44;
+export const INSTANT_MATCH_THRESHOLD = 0.34;
 export const FACE_AMBIGUITY_MARGIN = 0.05;
 export const ENROLL_MAX_SAMPLE_SPREAD = 0.42;
 

@@ -297,4 +297,9 @@ export const api = {
     request<{ message: string; cleared: number }>("/admin/faces/employees", {
       method: "DELETE",
     }),
+
+  resetAllFaces: () =>
+    request<{ message: string; cleared: number }>("/admin/faces/all", {
+      method: "DELETE",
+    }),
 };

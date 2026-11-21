@@ -323,21 +323,16 @@ export function CameraScanner({
           if (liveCheck.faceCount > 1) {
             resetBiometricCycle("Alerta: Múltiples personas en cuadro", true);
           } else if (liveCheck.faceCount === 0 || !liveCheck.primaryFace) {
-            lowOccupancyFramesRef.current += 1;
-            if (lowOccupancyFramesRef.current >= 2) {
-              resetBiometricCycle("Rostro fuera de cuadro · Ubica tu rostro");
-            }
+            resetBiometricCycle("Ubica tu rostro descubierto dentro del marco");
           } else if (
             currentIdentified &&
             liveCheck.primaryFace.descriptor.length === 128 &&
             profileDistance(liveCheck.primaryFace.descriptor, currentIdentified) >
-              FACE_MATCH_THRESHOLD + 0.03
+              FACE_MATCH_THRESHOLD
           ) {
-            resetBiometricCycle("Cambio de persona detectado · Re-identificando...", true);
-          } else {
-            lowOccupancyFramesRef.current = 0;
+            resetBiometricCycle("Rostro distinto detectado · Verificando...", true);
           }
-          scheduleNext(550);
+          scheduleNext(450);
           return;
         }
 
@@ -499,7 +494,7 @@ export function CameraScanner({
           identifiedProfile &&
           faceNow.primaryFace.descriptor.length === 128 &&
           profileDistance(faceNow.primaryFace.descriptor, identifiedProfile) >
-            FACE_MATCH_THRESHOLD + 0.03
+            FACE_MATCH_THRESHOLD
         ) {
           throw new Error("El rostro en cámara no coincide con el perfil identificado. Vuelve a mirar de frente.");
         }
@@ -742,7 +737,7 @@ export function CameraScanner({
                 <Text type="supporting">
                   {user
                     ? `Sesión: ${user.full_name}`
-                    : `Quiosco Activo · ${biometricDir.length} ${
+                    : `Quiosco v2.4 · ${biometricDir.length} ${
                         biometricDir.length === 1 ? "rostro" : "rostros"
                       }`}
                 </Text>

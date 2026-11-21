@@ -483,3 +483,23 @@ def reset_all_employee_faces(
         "message": f"Se eliminaron {cleared} registros faciales de empleados. Solo se conservó el perfil Admin.",
         "cleared": cleared,
     }
+
+
+@router.delete("/faces/all")
+def reset_all_faces_including_admin(
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    all_users = db.scalars(select(User)).all()
+    cleared = 0
+    for u in all_users:
+        if u.face_descriptor is not None or u.face_samples is not None:
+            u.face_descriptor = None
+            u.face_samples = None
+            u.face_enrolled_at = None
+            cleared += 1
+    db.commit()
+    return {
+        "message": f"Se eliminaron todos los registros faciales ({cleared} perfiles, incluyendo Admin).",
+        "cleared": cleared,
+    }
