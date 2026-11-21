@@ -1,10 +1,10 @@
 import * as faceapi from "@vladmandic/face-api";
 import { BiometricProfile } from "./api";
 
-export const FACE_MATCH_THRESHOLD = 0.58;
-export const INSTANT_MATCH_THRESHOLD = 0.46;
-export const FACE_AMBIGUITY_MARGIN = 0.04;
-export const ENROLL_MAX_SAMPLE_SPREAD = 0.52;
+export const FACE_MATCH_THRESHOLD = 0.38;
+export const INSTANT_MATCH_THRESHOLD = 0.28;
+export const FACE_AMBIGUITY_MARGIN = 0.05;
+export const ENROLL_MAX_SAMPLE_SPREAD = 0.42;
 
 let modelsLoaded = false;
 let loadingPromise: Promise<void> | null = null;
@@ -169,7 +169,7 @@ export async function analyzeVideoFaces(
     return { faceCount: 0, primaryFace: null };
   }
 
-  const { canvas, scaleX, scaleY } = getScaledVideoCanvas(video, 320);
+  const { canvas, scaleX, scaleY } = getScaledVideoCanvas(video, 416);
   const tinyOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.34 });
 
   if (computeDescriptor) {
@@ -340,7 +340,7 @@ export function profileDistance(descriptor: number[], profile: BiometricProfile)
 }
 
 export function distanceToSimilarity(distance: number): number {
-  return Math.max(0, Math.min(0.999, 1 - distance * 0.72));
+  return Math.max(0, Math.min(0.999, 1 - distance * 0.65));
 }
 
 export function matchFaceDescriptor(

@@ -51,9 +51,11 @@ import {
   ENROLL_MAX_SAMPLE_SPREAD,
   ensureFaceModelsLoaded,
   extractDescriptorFromImageFile,
+  FACE_MATCH_THRESHOLD,
   INSTANT_MATCH_THRESHOLD,
   matchFaceDescriptor,
   maxPairwiseDistance,
+  profileDistance,
   sampleTorsoHeadSignature,
 } from "../lib/faceBiometrics";
 import { Toast, ToastData } from "../components/ui/Toast";
@@ -136,6 +138,8 @@ export function CameraScanner({
   const matchStreakRef = useRef<{ id: number | null; distances: number[] }>({ id: null, distances: [] });
   const unknownFramesRef = useRef<number>(0);
 
+  const identifiedProfileRef = useRef<BiometricProfile | null>(null);
+  identifiedProfileRef.current = identifiedProfile;
   stageRef.current = stage;
 
   const isAdmin = user?.role === "admin";
@@ -314,18 +318,26 @@ export function CameraScanner({
         }
 
         if (currentStage === "READY_1STEP") {
-          const quickCheck = await analyzeVideoFaces(videoRef.current, false, false);
-          if (quickCheck.faceCount > 1) {
+          const currentIdentified = identifiedProfileRef.current;
+          const liveCheck = await analyzeVideoFaces(videoRef.current, true, true);
+          if (liveCheck.faceCount > 1) {
             resetBiometricCycle("Alerta: Múltiples personas en cuadro", true);
-          } else if (quickCheck.faceCount === 0) {
+          } else if (liveCheck.faceCount === 0 || !liveCheck.primaryFace) {
             lowOccupancyFramesRef.current += 1;
-            if (lowOccupancyFramesRef.current >= 5) {
-              resetBiometricCycle("Rostro fuera de cuadro");
+            if (lowOccupancyFramesRef.current >= 2) {
+              resetBiometricCycle("Rostro fuera de cuadro · Ubica tu rostro");
             }
+          } else if (
+            currentIdentified &&
+            liveCheck.primaryFace.descriptor.length === 128 &&
+            profileDistance(liveCheck.primaryFace.descriptor, currentIdentified) >
+              FACE_MATCH_THRESHOLD + 0.03
+          ) {
+            resetBiometricCycle("Cambio de persona detectado · Re-identificando...", true);
           } else {
             lowOccupancyFramesRef.current = 0;
           }
-          scheduleNext(900);
+          scheduleNext(550);
           return;
         }
 
@@ -473,16 +485,27 @@ export function CameraScanner({
       let faceBox: Box | undefined;
       let bridgeBox: Box | undefined;
       if (modelsReady && videoRef.current) {
-        try {
-          const faceNow = await analyzeVideoFaces(videoRef.current, true, false);
-          if (faceNow.faceCount === 1 && faceNow.primaryFace) {
-            faceBox = faceNow.primaryFace.box;
-            bridgeBox = faceNow.primaryFace.bridgeBox;
-          }
-        } catch {
-          faceBox = undefined;
-          bridgeBox = undefined;
+        const needDescriptorCheck = Boolean(identifiedProfile && !requiresTwoPhase);
+        const faceNow = await analyzeVideoFaces(videoRef.current, true, needDescriptorCheck);
+
+        if (faceNow.faceCount === 0 || !faceNow.primaryFace) {
+          throw new Error("No se detectó ningún rostro frente a la cámara. Ubícate en el marco e inténtalo de nuevo.");
         }
+        if (faceNow.faceCount > 1) {
+          throw new Error("Se detectó más de una persona en cámara. Solo una persona puede marcar a la vez.");
+        }
+        if (
+          needDescriptorCheck &&
+          identifiedProfile &&
+          faceNow.primaryFace.descriptor.length === 128 &&
+          profileDistance(faceNow.primaryFace.descriptor, identifiedProfile) >
+            FACE_MATCH_THRESHOLD + 0.03
+        ) {
+          throw new Error("El rostro en cámara no coincide con el perfil identificado. Vuelve a mirar de frente.");
+        }
+
+        faceBox = faceNow.primaryFace.box;
+        bridgeBox = faceNow.primaryFace.bridgeBox;
       }
 
       const blobs: Blob[] = [];
@@ -940,10 +963,10 @@ export function CameraScanner({
                       <div className="flex min-w-0 items-center gap-2">
                         <UserCheck className="h-4 w-4 shrink-0 text-emerald-400" />
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">
+                          <p style={{ color: "#ffffff" }} className="truncate text-sm font-semibold">
                             {identifiedProfile.full_name}
                           </p>
-                          <p className="truncate text-xs text-neutral-300">
+                          <p style={{ color: "#d4d4d8" }} className="truncate text-xs">
                             {identifiedProfile.job_title}
                             {identifiedSimilarity
                               ? ` · ${(identifiedSimilarity * 100).toFixed(0)}% coincidencia`
