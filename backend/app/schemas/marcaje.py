@@ -16,7 +16,6 @@ class WorkZoneOut(BaseModel):
     require_glasses: bool
     require_mask: bool
     require_vest: bool
-    require_epp_on_exit: bool = False
     min_confidence: float
     is_active: bool
 
