@@ -46,7 +46,6 @@ class WorkZone(Base):
     require_glasses: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     require_mask: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     require_vest: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    require_epp_on_exit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     min_confidence: Mapped[float] = mapped_column(Float, default=0.20, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

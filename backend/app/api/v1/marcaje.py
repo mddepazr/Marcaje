@@ -334,7 +334,7 @@ def scan_ppe(
         )
 
     missing_items: list[str] = []
-    if (normalized_event == "ENTRY" or bool(getattr(zone, "require_epp_on_exit", False))):
+    if normalized_event == "ENTRY":
         if req_helmet and not analysis["has_helmet"]:
             missing_items.append("Casco")
         if req_glasses and not analysis["has_glasses"]:
