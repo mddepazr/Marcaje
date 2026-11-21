@@ -59,7 +59,6 @@ class AttendanceRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     zone_id: Mapped[int | None] = mapped_column(ForeignKey("work_zones.id"), nullable=True, index=True)
-    active_zone_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     zone_name: Mapped[str] = mapped_column(String(100), default="Planta General", nullable=False)
     event_type: Mapped[str] = mapped_column(String(20), default="ENTRY", nullable=False)
     recognition_method: Mapped[str] = mapped_column(String(30), default="session", nullable=False)
