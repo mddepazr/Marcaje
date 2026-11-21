@@ -19,6 +19,7 @@ export interface WorkZone {
   require_glasses: boolean;
   require_mask: boolean;
   require_vest: boolean;
+  require_epp_on_exit?: boolean;
   min_confidence: number;
   is_active: boolean;
 }

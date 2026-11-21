@@ -119,6 +119,7 @@ def create_work_zone(
         require_glasses=payload.require_glasses,
         require_mask=payload.require_mask,
         require_vest=payload.require_vest,
+        require_epp_on_exit=bool(getattr(payload, "require_epp_on_exit", False)),
         min_confidence=payload.min_confidence,
         is_active=True,
     )
@@ -151,6 +152,8 @@ def update_work_zone(
         zone.require_mask = payload.require_mask
     if payload.require_vest is not None:
         zone.require_vest = payload.require_vest
+    if getattr(payload, "require_epp_on_exit", None) is not None:
+        zone.require_epp_on_exit = bool(payload.require_epp_on_exit)
     if payload.min_confidence is not None:
         zone.min_confidence = payload.min_confidence
     if payload.is_active is not None:
