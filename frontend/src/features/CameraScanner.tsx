@@ -245,9 +245,12 @@ export function CameraScanner({
 
   useEffect(() => {
     if (enrollOpen && enrollMode === "camera" && enrollVideoRef.current && mediaStreamRef.current) {
-      enrollVideoRef.current.srcObject = mediaStreamRef.current;
+      if (enrollVideoRef.current.srcObject !== mediaStreamRef.current) {
+        enrollVideoRef.current.srcObject = mediaStreamRef.current;
+      }
+      enrollVideoRef.current.play().catch(() => {});
     }
-  }, [enrollOpen, enrollMode]);
+  }, [enrollOpen, enrollMode, cameraReady]);
 
   useEffect(() => {
     if (!cameraReady || !modelsReady || enrollOpen) return;
@@ -1178,7 +1181,7 @@ export function CameraScanner({
           purpose="form"
         >
           <form onSubmit={handleEnrollFaceSubmit}>
-            <VStack gap={4}>
+            <VStack gap={3}>
               <DialogHeader
                 onOpenChange={(isOpen) => {
                   if (!isOpen && !enrolling) closeEnrollModal();
@@ -1191,104 +1194,116 @@ export function CameraScanner({
                 title="Registrar Perfil Biométrico"
               />
 
-              <SegmentedControl
-                label="Método de captura biométrica"
-                layout="fill"
-                value={enrollMode}
-                onChange={(val) => setEnrollMode(val as "camera" | "photo")}
-              >
-                <SegmentedControlItem
-                  value="camera"
-                  label="Cámara en vivo"
-                  icon={<Camera className="h-3.5 w-3.5" />}
-                />
-                <SegmentedControlItem
-                  value="photo"
-                  label="Desde fotografía"
-                  icon={<ImageIcon className="h-3.5 w-3.5" />}
-                />
-              </SegmentedControl>
-
-              {enrollMode === "camera" ? (
-                <div
-                  style={{ borderColor: "var(--color-border-subtle)" }}
-                  className="relative mx-auto aspect-[4/3] w-full overflow-hidden rounded-2xl border bg-black"
-                >
-                  <video
-                    ref={enrollVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="h-full w-full -scale-x-100 object-cover"
-                  />
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                    <div className="h-36 w-28 rounded-full border-2 border-dashed border-emerald-400/80" />
-                  </div>
-                  <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-white/90">
-                    Rostro descubierto, de frente y quieto ~2 s al guardar
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <input
-                    ref={enrollPhotoInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] || null;
-                      setEnrollPhotoFile(f);
-                      if (enrollPhotoPreview) URL.revokeObjectURL(enrollPhotoPreview);
-                      setEnrollPhotoPreview(f ? URL.createObjectURL(f) : null);
-                    }}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => enrollPhotoInputRef.current?.click()}
-                    style={{
-                      backgroundColor: "var(--color-background-muted)",
-                      borderColor: "var(--color-border-subtle)",
-                    }}
-                    className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed p-5 text-center transition hover:opacity-90"
+              <div className="max-h-[58dvh] overflow-y-auto overscroll-contain pr-1">
+                <VStack gap={3}>
+                  <SegmentedControl
+                    label="Método de captura biométrica"
+                    layout="fill"
+                    value={enrollMode}
+                    onChange={(val) => setEnrollMode(val as "camera" | "photo")}
                   >
-                    {enrollPhotoPreview ? (
-                      <img
-                        src={enrollPhotoPreview}
-                        alt="Vista previa rostro"
-                        className="h-32 w-32 rounded-2xl object-cover"
+                    <SegmentedControlItem
+                      value="camera"
+                      label="Cámara en vivo"
+                      icon={<Camera className="h-3.5 w-3.5" />}
+                    />
+                    <SegmentedControlItem
+                      value="photo"
+                      label="Desde fotografía"
+                      icon={<ImageIcon className="h-3.5 w-3.5" />}
+                    />
+                  </SegmentedControl>
+
+                  {enrollMode === "camera" ? (
+                    <div
+                      style={{ borderColor: "var(--color-border-subtle)" }}
+                      className="relative mx-auto aspect-[4/3] max-h-56 w-full overflow-hidden rounded-2xl border bg-black"
+                    >
+                      <video
+                        ref={(el) => {
+                          enrollVideoRef.current = el;
+                          if (el && mediaStreamRef.current && el.srcObject !== mediaStreamRef.current) {
+                            el.srcObject = mediaStreamRef.current;
+                            el.play().catch(() => {});
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="h-full w-full -scale-x-100 object-cover"
                       />
-                    ) : (
-                      <VStack gap={1.5} hAlign="center">
-                        <Upload className="h-6 w-6" />
-                        <Text type="label">Seleccionar foto frontal del colaborador</Text>
-                        <Text type="supporting">
-                          JPG, PNG o WEBP · Sin mascarilla ni lentes oscuros
-                        </Text>
-                      </VStack>
-                    )}
-                  </button>
-                </div>
-              )}
+                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                        <div className="h-32 w-24 rounded-full border-2 border-dashed border-emerald-400/80" />
+                      </div>
+                      <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-white/90">
+                        Rostro descubierto, de frente y quieto ~2 s al guardar
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <input
+                        ref={enrollPhotoInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          setEnrollPhotoFile(f);
+                          if (enrollPhotoPreview) URL.revokeObjectURL(enrollPhotoPreview);
+                          setEnrollPhotoPreview(f ? URL.createObjectURL(f) : null);
+                        }}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => enrollPhotoInputRef.current?.click()}
+                        style={{
+                          backgroundColor: "var(--color-background-muted)",
+                          borderColor: "var(--color-border-subtle)",
+                        }}
+                        className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed p-5 text-center transition hover:opacity-90"
+                      >
+                        {enrollPhotoPreview ? (
+                          <img
+                            src={enrollPhotoPreview}
+                            alt="Vista previa rostro"
+                            className="h-32 w-32 rounded-2xl object-cover"
+                          />
+                        ) : (
+                          <VStack gap={1.5} hAlign="center">
+                            <Upload className="h-6 w-6" />
+                            <Text type="label">Seleccionar foto frontal del colaborador</Text>
+                            <Text type="supporting">
+                              JPG, PNG o WEBP · Sin mascarilla ni lentes oscuros
+                            </Text>
+                          </VStack>
+                        )}
+                      </button>
+                    </div>
+                  )}
 
-              {user.role === "admin" && allUsers.length > 0 && (
-                <Selector
-                  hasSearch
-                  label="Colaborador a registrar"
-                  options={userOptions}
-                  value={String(enrollTargetUserId)}
-                  width="100%"
-                  onChange={(val) => setEnrollTargetUserId(Number(val))}
-                />
-              )}
+                  {user.role === "admin" && allUsers.length > 0 && (
+                    <Selector
+                      hasSearch
+                      label="Colaborador a registrar"
+                      options={userOptions}
+                      value={String(enrollTargetUserId)}
+                      width="100%"
+                      onChange={(val) => setEnrollTargetUserId(Number(val))}
+                    />
+                  )}
 
-              <TextInput
-                isOptional
-                label="Código o carné de empleado"
-                placeholder="Ej. 2500587"
-                value={enrollCode}
-                onChange={setEnrollCode}
-                width="100%"
-              />
+                  <TextInput
+                    isOptional
+                    label="Código o carné de empleado"
+                    placeholder="Ej. 2500587"
+                    value={enrollCode}
+                    onChange={setEnrollCode}
+                    width="100%"
+                  />
+                </VStack>
+              </div>
+
+              <Divider />
 
               <HStack gap={2} hAlign="end">
                 <Button
