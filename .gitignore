@@ -12,3 +12,5 @@ frontend/dist/
 __pycache__/
 *.py[cod]
 .DS_Store
+backend/epp_local.db
+backend/logs/

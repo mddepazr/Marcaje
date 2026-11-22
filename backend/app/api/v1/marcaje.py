@@ -17,7 +17,7 @@ router = APIRouter(prefix="/marcaje", tags=["Marcaje EPP"])
 
 DUPLICATE_FACE_DISTANCE = 0.42
 
-UPLOAD_DIR = Path("/app/uploads")
+UPLOAD_DIR = Path("./uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_FILE_SIZE = 5 * 1024 * 1024
